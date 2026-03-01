@@ -95,14 +95,17 @@ typedef struct {
     int count;
 } sat_entry_t;
 
-/* ACARS aircraft beam-based position (one entry per tail number) */
+/* ACARS aircraft position (one entry per tail number) */
 typedef struct {
     char reg[16];    /* registration / tail number */
     char flight[8];  /* flight number, may be empty */
+    char oooi[8];    /* last OOOI event: "OUT","OFF","ON","IN", or empty */
     int sat_id, beam_id;
     double fix_lat[MAX_AIRCRAFT_FIXES];
     double fix_lon[MAX_AIRCRAFT_FIXES];
     uint64_t fix_t[MAX_AIRCRAFT_FIXES];  /* seconds since epoch */
+    int fix_alt[MAX_AIRCRAFT_FIXES];     /* altitude in feet, -99999 if unknown */
+    uint8_t fix_adsc[MAX_AIRCRAFT_FIXES]; /* 1=ADS-C GPS position, 0=beam estimate */
     int n_fixes;
     double frequency;
     uint64_t last_seen;  /* ns, for eviction */
@@ -383,7 +386,9 @@ void mtpos_ida_cb(const uint8_t *data, int len,
 void web_map_add_aircraft(const char *reg, const char *flight,
                            double lat, double lon,
                            int sat_id, int beam_id,
-                           uint64_t timestamp_ns, double frequency)
+                           uint64_t timestamp_ns, double frequency,
+                           int alt_ft, int adsc_pos,
+                           const char *oooi)
 {
     if (!reg || !reg[0]) return;
 
@@ -424,20 +429,31 @@ void web_map_add_aircraft(const char *reg, const char *flight,
         ac->flight[7] = '\0';
     }
 
+    if (oooi && oooi[0]) {
+        strncpy(ac->oooi, oooi, 7);
+        ac->oooi[7] = '\0';
+    }
+
     /* Append fix; shift out oldest when the history is full */
     int nf = ac->n_fixes;
     if (nf >= MAX_AIRCRAFT_FIXES) {
-        memmove(&ac->fix_lat[0], &ac->fix_lat[1],
+        memmove(&ac->fix_lat[0],  &ac->fix_lat[1],
                 (MAX_AIRCRAFT_FIXES - 1) * sizeof(ac->fix_lat[0]));
-        memmove(&ac->fix_lon[0], &ac->fix_lon[1],
+        memmove(&ac->fix_lon[0],  &ac->fix_lon[1],
                 (MAX_AIRCRAFT_FIXES - 1) * sizeof(ac->fix_lon[0]));
-        memmove(&ac->fix_t[0], &ac->fix_t[1],
+        memmove(&ac->fix_t[0],    &ac->fix_t[1],
                 (MAX_AIRCRAFT_FIXES - 1) * sizeof(ac->fix_t[0]));
+        memmove(&ac->fix_alt[0],  &ac->fix_alt[1],
+                (MAX_AIRCRAFT_FIXES - 1) * sizeof(ac->fix_alt[0]));
+        memmove(&ac->fix_adsc[0], &ac->fix_adsc[1],
+                (MAX_AIRCRAFT_FIXES - 1) * sizeof(ac->fix_adsc[0]));
         nf = MAX_AIRCRAFT_FIXES - 1;
     }
-    ac->fix_lat[nf] = lat;
-    ac->fix_lon[nf] = lon;
-    ac->fix_t[nf]   = timestamp_ns / 1000000000ULL;
+    ac->fix_lat[nf]  = lat;
+    ac->fix_lon[nf]  = lon;
+    ac->fix_t[nf]    = timestamp_ns / 1000000000ULL;
+    ac->fix_alt[nf]  = alt_ft;
+    ac->fix_adsc[nf] = (uint8_t)adsc_pos;
     ac->n_fixes = nf + 1;
     ac->sat_id    = sat_id;
     ac->beam_id   = beam_id;
@@ -541,22 +557,26 @@ static int build_json(char *buf, int bufsize)
     }
     off += snprintf(buf + off, bufsize - off, "]");
 
-    /* ACARS aircraft beam-based positions */
+    /* ACARS aircraft positions (ADS-C or beam-based) */
     off += snprintf(buf + off, bufsize - off, ",\"aircraft\":[");
+    int first_ac = 1;
     for (int i = 0; i < state.n_aircraft; i++) {
         aircraft_entry_t *ac = &state.aircraft[i];
         if (ac->n_fixes == 0) continue;
-        if (i > 0) off += snprintf(buf + off, bufsize - off, ",");
+        if (!first_ac) off += snprintf(buf + off, bufsize - off, ",");
+        first_ac = 0;
         off += snprintf(buf + off, bufsize - off,
-            "{\"reg\":\"%s\",\"flight\":\"%s\","
+            "{\"reg\":\"%s\",\"flight\":\"%s\",\"oooi\":\"%s\","
             "\"sat\":%d,\"beam\":%d,\"freq\":%.0f,\"fixes\":[",
-            ac->reg, ac->flight, ac->sat_id, ac->beam_id, ac->frequency);
+            ac->reg, ac->flight, ac->oooi,
+            ac->sat_id, ac->beam_id, ac->frequency);
         for (int j = 0; j < ac->n_fixes; j++) {
             if (j > 0) off += snprintf(buf + off, bufsize - off, ",");
             off += snprintf(buf + off, bufsize - off,
-                "{\"lat\":%.4f,\"lon\":%.4f,\"t\":%llu}",
+                "{\"lat\":%.5f,\"lon\":%.5f,\"t\":%llu,\"alt\":%d,\"adsc\":%d}",
                 ac->fix_lat[j], ac->fix_lon[j],
-                (unsigned long long)ac->fix_t[j]);
+                (unsigned long long)ac->fix_t[j],
+                ac->fix_alt[j], (int)ac->fix_adsc[j]);
         }
         off += snprintf(buf + off, bufsize - off, "]}");
         if (off >= bufsize - 512) break;
@@ -814,19 +834,24 @@ static const char HTML_PAGE[] =
 "            {color:col,weight:2,opacity:0.5,dashArray:'6,4'}).addTo(acarsLy);\n"
 "        });\n"
 "      }\n"
-"      var label=ac.reg+(ac.flight?' / '+ac.flight:'');\n"
+"      var label=ac.reg+(ac.flight?' / '+ac.flight:'')+(ac.oooi?' ['+ac.oooi+']':'');\n"
 "      var m=L.circleMarker([last.lat,last.lon],{\n"
 "        radius:7,color:col,fillColor:col,fillOpacity:0.9,weight:2\n"
 "      });\n"
 "      m.bindTooltip(label,{direction:'top',offset:[0,-8]});\n"
 "      var ts=new Date(last.t*1000).toUTCString().replace(/.*?([0-9]{2}:[0-9]{2}:[0-9]{2}).*/,'$1')+' UTC';\n"
+"      var altStr=last.alt>-99999?'<b>Altitude:</b> '+(last.alt).toLocaleString()+' ft<br>':'';\n"
+"      var posStr=last.adsc?'<span style=\"color:#22c55e;font-size:11px\">ADS-C GPS position</span>':'<span style=\"color:#94a3b8;font-size:11px\">~200 km beam estimate</span>';\n"
+"      var ooiStr=ac.oooi?'<b>Event:</b> <span style=\"color:#f59e0b;font-weight:600\">'+ac.oooi+'</span><br>':'';\n"
 "      m.bindPopup('<div class=\"popup-title popup-ac\" style=\"color:'+col+'\">Aircraft</div>'\n"
 "        +'<b>Reg:</b> '+ac.reg+'<br>'\n"
 "        +(ac.flight?'<b>Flight:</b> '+ac.flight+'<br>':'')\n"
+"        +ooiStr\n"
+"        +altStr\n"
 "        +'<b>Sat:</b> '+ac.sat+'  Beam: '+ac.beam+'<br>'\n"
-"        +'<b>Beam center:</b> '+last.lat.toFixed(2)+', '+last.lon.toFixed(2)+'<br>'\n"
+"        +'<b>Position:</b> '+last.lat.toFixed(last.adsc?4:2)+', '+last.lon.toFixed(last.adsc?4:2)+'<br>'\n"
 "        +'<b>Last msg:</b> '+ts+'<br>'\n"
-"        +'<i style=\"color:#94a3b8;font-size:11px\">~200 km beam accuracy</i>');\n"
+"        +posStr);\n"
 "      m.addTo(acarsLy);\n"
 "    });\n"
 "  }\n"
