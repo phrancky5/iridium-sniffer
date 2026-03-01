@@ -383,6 +383,19 @@ void mtpos_ida_cb(const uint8_t *data, int len,
 
 /* ---- Aircraft beam-based position ---- */
 
+/* Haversine great-circle distance in km */
+static double aircraft_dist_km(double lat1, double lon1,
+                                double lat2, double lon2)
+{
+    const double R = 6371.0;
+    double dlat = (lat2 - lat1) * M_PI / 180.0;
+    double dlon = (lon2 - lon1) * M_PI / 180.0;
+    double a = sin(dlat/2)*sin(dlat/2) +
+               cos(lat1*M_PI/180.0)*cos(lat2*M_PI/180.0)*
+               sin(dlon/2)*sin(dlon/2);
+    return R * 2.0 * atan2(sqrt(a), sqrt(1.0 - a));
+}
+
 void web_map_add_aircraft(const char *reg, const char *flight,
                            double lat, double lon,
                            int sat_id, int beam_id,
@@ -432,6 +445,24 @@ void web_map_add_aircraft(const char *reg, const char *flight,
     if (oooi && oooi[0]) {
         strncpy(ac->oooi, oooi, 7);
         ac->oooi[7] = '\0';
+    }
+
+    /* Speed plausibility check: reject beam-estimate fixes that would require
+     * flying faster than 1200 km/h (commercial max + supersonic buffer).
+     * ADS-C GPS positions bypass this check since they're not beam guesses. */
+    if (!adsc_pos && ac->n_fixes > 0) {
+        int last = ac->n_fixes - 1;
+        double dt_s = (double)(timestamp_ns - ac->last_seen) / 1e9;
+        if (dt_s > 0.0 && dt_s < 7200.0) {
+            double max_km = (dt_s / 3600.0) * 1200.0;
+            double dist = aircraft_dist_km(ac->fix_lat[last], ac->fix_lon[last],
+                                           lat, lon);
+            if (dist > max_km) {
+                /* Implausible jump - beam from wrong satellite, discard */
+                pthread_mutex_unlock(&state.lock);
+                return;
+            }
+        }
     }
 
     /* Append fix; shift out oldest when the history is full */
