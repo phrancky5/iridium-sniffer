@@ -69,6 +69,7 @@ extern double soapy_gain_val;
 extern int bias_tee;
 extern int use_gpu;
 extern int no_simd;
+extern int use_chase;
 extern char *save_bursts_dir;
 extern int web_enabled;
 extern int web_port;
@@ -129,6 +130,13 @@ static void usage(int exitcode) {
 "    --no-gpu                disable GPU acceleration (use CPU FFTW)\n"
 #endif
 "    --no-simd               disable SIMD acceleration (use scalar kernels)\n"
+"    --chase[=N]             enable Chase soft-decision BCH decoder (experimental)\n"
+"                             N = flip-bits count, 0-7 (default 5 = 31 combos).\n"
+"                             0 or omitting --chase disables (default).\n"
+"                             Generates per-bit LLR scores; tries 2^N-1 flip\n"
+"                             combinations on BCH-rejected blocks.  IDA/ACARS\n"
+"                             path gated by CRC-16; IRA/IBC have no payload CRC.\n"
+"                             Off by default.\n"
 "\n"
 "Web map:\n"
 "    --web[=PORT]            enable live web map (default port: 8888)\n"
@@ -200,6 +208,7 @@ void parse_options(int argc, char **argv) {
         OPT_LIST,
         OPT_NO_GPU,
         OPT_NO_SIMD,
+        OPT_CHASE,
         OPT_WEB,
         OPT_GSMTAP,
         OPT_SAVE_BURSTS,
@@ -238,6 +247,7 @@ void parse_options(int argc, char **argv) {
         { "soapy-gain",     required_argument, NULL, OPT_SOAPY_GAIN },
         { "no-gpu",         no_argument,       NULL, OPT_NO_GPU },
         { "no-simd",        no_argument,       NULL, OPT_NO_SIMD },
+        { "chase",          optional_argument, NULL, OPT_CHASE },
         { "web",            optional_argument, NULL, OPT_WEB },
         { "gsmtap",         optional_argument, NULL, OPT_GSMTAP },
         { "save-bursts",    required_argument, NULL, OPT_SAVE_BURSTS },
@@ -349,6 +359,12 @@ void parse_options(int argc, char **argv) {
             case OPT_SOAPY_GAIN:  soapy_gain_val   = atof(optarg); break;
             case OPT_NO_GPU:      use_gpu = 0;                       break;
             case OPT_NO_SIMD:     no_simd = 1;                       break;
+            case OPT_CHASE:
+                use_chase = optarg ? atoi(optarg) : 5;
+                if (use_chase < 0 || use_chase > 7)
+                    errx(1, "--chase flip-bits must be 0-7 (got %d); "
+                         "0 disables, default is 5 (31 combinations)", use_chase);
+                break;
             case OPT_WEB:
                 web_enabled = 1;
                 if (optarg) web_port = atoi(optarg);

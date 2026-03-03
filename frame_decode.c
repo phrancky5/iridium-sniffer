@@ -45,7 +45,8 @@
 #define BCH_HDR_DATA  3      /* 7 - 4 = 3 data bits */
 
 /* Chase decoder: flip up to N least-reliable bits, retry BCH */
-#define CHASE_FLIP_BITS 5    /* 2^5 = 32 combinations per failed block */
+#define CHASE_FLIP_MAX 7     /* Max of 7 (127 combinations); stack array sized to that max. */
+extern int use_chase;        /* Chase flip-bits count comes from the --chase=N runtime option */
 
 /* Access codes (24 bits after UW) */
 static const uint8_t access_dl[] = {
@@ -241,17 +242,18 @@ static int chase_bch_decode_p(const uint8_t *block32, const float *llr32,
         return syn_ra[syndrome].errs;
     }
 
-    /* Standard BCH failed -- Chase decode with soft info */
+    /* Standard BCH failed -- Chase decode with soft info (--chase only) */
     if (!llr32)
         return -1;
 
-    /* Find CHASE_FLIP_BITS least-reliable positions within the 31-bit codeword.
-     * Simple partial selection sort (N=5 from 31 elements). */
+    int k = use_chase;  /* flip-bits count for this call */
+
+    /* Partial selection sort: move k least-reliable indices to front */
     int pos[31];
     for (int i = 0; i < 31; i++)
         pos[i] = i;
 
-    for (int i = 0; i < CHASE_FLIP_BITS; i++) {
+    for (int i = 0; i < k; i++) {
         int min_idx = i;
         for (int j = i + 1; j < 31; j++) {
             if (llr32[pos[j]] < llr32[pos[min_idx]])
@@ -264,15 +266,15 @@ static int chase_bch_decode_p(const uint8_t *block32, const float *llr32,
 
     /* Pre-compute flip masks for each candidate position.
      * bits_to_uint puts bit[0] at bit position 30, bit[k] at position (30-k). */
-    uint32_t flip_mask[CHASE_FLIP_BITS];
-    for (int i = 0; i < CHASE_FLIP_BITS; i++)
+    uint32_t flip_mask[CHASE_FLIP_MAX];
+    for (int i = 0; i < k; i++)
         flip_mask[i] = 1u << (30 - pos[i]);
 
-    /* Try all 2^CHASE_FLIP_BITS - 1 non-zero combinations */
+    /* Try all 2^k - 1 non-zero combinations */
     uint32_t base_val = bits_to_uint(block32, 31);
-    for (int mask = 1; mask < (1 << CHASE_FLIP_BITS); mask++) {
+    for (int mask = 1; mask < (1 << k); mask++) {
         uint32_t flipped = base_val;
-        for (int b = 0; b < CHASE_FLIP_BITS; b++) {
+        for (int b = 0; b < k; b++) {
             if (mask & (1 << b))
                 flipped ^= flip_mask[b];
         }

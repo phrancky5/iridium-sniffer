@@ -142,6 +142,7 @@ char *save_bursts_dir = NULL;
 int diagnostic_mode = 0;
 int use_gardner = 1;
 int parsed_mode = 0;
+int use_chase = 0;
 int position_enabled = 0;
 double position_height = 0;
 int acars_enabled = 0;
