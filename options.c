@@ -360,10 +360,10 @@ void parse_options(int argc, char **argv) {
             case OPT_NO_GPU:      use_gpu = 0;                       break;
             case OPT_NO_SIMD:     no_simd = 1;                       break;
             case OPT_CHASE:
-                use_chase = optarg ? atoi(optarg) : 3;
+                use_chase = optarg ? atoi(optarg) : 0;
                 if (use_chase < 0 || use_chase > 7)
                     errx(1, "--chase flip-bits must be 0-7 (got %d); "
-                         "0 disables, default is 3 (7 combinations, IDA only)", use_chase);
+                         "0=disabled (default), k=1-7 enables soft-decision BCH on IDA only", use_chase);
                 break;
             case OPT_WEB:
                 web_enabled = 1;
