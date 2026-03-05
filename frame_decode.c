@@ -242,57 +242,9 @@ static int chase_bch_decode_p(const uint8_t *block32, const float *llr32,
         return syn_ra[syndrome].errs;
     }
 
-    /* Standard BCH failed -- Chase decode with soft info (--chase only) */
-    if (!llr32)
-        return -1;
-
-    int k = use_chase;  /* flip-bits count for this call */
-
-    /* Partial selection sort: move k least-reliable indices to front */
-    int pos[31];
-    for (int i = 0; i < 31; i++)
-        pos[i] = i;
-
-    for (int i = 0; i < k; i++) {
-        int min_idx = i;
-        for (int j = i + 1; j < 31; j++) {
-            if (llr32[pos[j]] < llr32[pos[min_idx]])
-                min_idx = j;
-        }
-        int tmp = pos[i];
-        pos[i] = pos[min_idx];
-        pos[min_idx] = tmp;
-    }
-
-    /* Pre-compute flip masks for each candidate position.
-     * bits_to_uint puts bit[0] at bit position 30, bit[k] at position (30-k). */
-    uint32_t flip_mask[CHASE_FLIP_MAX];
-    for (int i = 0; i < k; i++)
-        flip_mask[i] = 1u << (30 - pos[i]);
-
-    /* Try all 2^k - 1 non-zero combinations */
-    uint32_t base_val = bits_to_uint(block32, 31);
-    for (int mask = 1; mask < (1 << k); mask++) {
-        uint32_t flipped = base_val;
-        for (int b = 0; b < k; b++) {
-            if (mask & (1 << b))
-                flipped ^= flip_mask[b];
-        }
-
-        syndrome = gf2_remainder(BCH_POLY_RA, flipped);
-        if (syndrome == 0) {
-            uint_to_bits(flipped >> 10, out_data, BCH_RA_DATA);
-            uint_to_bits(flipped & 0x3FF, out_check, 10);
-            return 0;
-        }
-        if (syndrome < 1024 && syn_ra[syndrome].errs >= 0) {
-            flipped ^= syn_ra[syndrome].locator;
-            uint_to_bits(flipped >> 10, out_data, BCH_RA_DATA);
-            uint_to_bits(flipped & 0x3FF, out_check, 10);
-            return syn_ra[syndrome].errs;
-        }
-    }
-
+    /* Chase is disabled for IRA/IBC frames -- false positives on
+     * unvalidated physical-layer frames corrupt satellite position data.
+     * Standard BCH (t=2) is the only correction applied here. */
     return -1;
 }
 
