@@ -224,7 +224,7 @@ The AVX2 SIMD kernels provide a 1.9x CPU time reduction. GPU acceleration adds s
 
 All configurations produce identical demodulated output (frame count, bit content). GPU vs CPU may differ by a few frames due to floating-point rounding in the burst detection FFT.
 
-The IDA decoder uses BCH(31,20) t=2 hard-decision error correction, identical to iridium-toolkit's `bch_repair()`. Standard BCH corrects up to 2 bit errors per 31-bit block. An experimental Chase soft-decision extension is available via `--chase=N` (N=1..7), which uses per-bit amplitude scores from the demodulator to attempt recovery of blocks with more than 2 errors on **IDA frames only** (IRA/IBC Chase is completely disabled). Chase is off by default (`use_chase=0`). When enabled, it prints debug diagnostics to stderr showing failed/recovered blocks, convergence statistics, and LLR values — useful for validating whether recoveries are likely correct or false positives due to noise.
+The IDA decoder uses BCH(31,20) t=2 hard-decision error correction, identical to iridium-toolkit's `bch_repair()`. Standard BCH corrects up to 2 bit errors per 31-bit block. An experimental Chase soft-decision extension is available via `--chase=N` (N=1..7), which uses per-bit amplitude scores from the demodulator to attempt recovery of blocks with more than 2 errors on **IDA frames only** (IRA/IBC Chase is completely disabled). Chase recovery is off by default.
 
 ## Built-in Web Map (Beta)
 
