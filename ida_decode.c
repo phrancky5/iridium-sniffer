@@ -102,7 +102,8 @@ void ida_decode_init(void)
 }
 
 /* Chase decoder: flip up to N least-reliable bits, retry BCH */
-#define CHASE_FLIP_BITS 5
+#define IDA_CHASE_FLIP_MAX 7   /* Max of 7 (127 combinations); stack array sized to that max. */
+extern int use_chase;          /* Chase flip-bits count comes from the --chase=N runtime option */
 
 static int chase_bch_da(const uint8_t *block31, const float *llr31,
                         uint8_t *out_data, int *fixed)
@@ -128,11 +129,13 @@ static int chase_bch_da(const uint8_t *block31, const float *llr31,
         return -1;
 
     /* Find CHASE_FLIP_BITS least-reliable positions */
+    int k = use_chase;
+
     int pos[31];
     for (int i = 0; i < 31; i++)
         pos[i] = i;
 
-    for (int i = 0; i < CHASE_FLIP_BITS; i++) {
+    for (int i = 0; i < k; i++) {
         int min_idx = i;
         for (int j = i + 1; j < 31; j++) {
             if (llr31[pos[j]] < llr31[pos[min_idx]])
@@ -143,14 +146,14 @@ static int chase_bch_da(const uint8_t *block31, const float *llr31,
         pos[min_idx] = tmp;
     }
 
-    uint32_t flip_mask[CHASE_FLIP_BITS];
-    for (int i = 0; i < CHASE_FLIP_BITS; i++)
+    uint32_t flip_mask[IDA_CHASE_FLIP_MAX];
+    for (int i = 0; i < k; i++)
         flip_mask[i] = 1u << (30 - pos[i]);
 
     uint32_t base_val = bits_to_uint(block31, 31);
-    for (int mask = 1; mask < (1 << CHASE_FLIP_BITS); mask++) {
+    for (int mask = 1; mask < (1 << k); mask++) {
         uint32_t flipped = base_val;
-        for (int b = 0; b < CHASE_FLIP_BITS; b++) {
+        for (int b = 0; b < k; b++) {
             if (mask & (1 << b))
                 flipped ^= flip_mask[b];
         }

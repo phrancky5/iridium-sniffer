@@ -16,7 +16,6 @@ Native GSMTAP output (`--gsmtap`) sends decoded IDA (Iridium Data) frames direct
 - Direct iridium-toolkit RAW output, compatible with iridium-parser.py and reassembler.py
 - Built-in ACARS/SBD decoding (`--acars`) with optional libacars-2 ARINC-622/ADS-C/CPDLC support
 - Parsed IDA output mode (`--parsed`) for direct reassembler.py piping (ACARS/SBD recovery)
-- Chase BCH soft-decision decoding recovers 37% more IDA frames than iridium-parser.py
 - Gardner timing recovery (enabled by default) for improved weak burst demodulation
 - Native GSMTAP/LAPDm output to Wireshark (`--gsmtap`) for IDA frame analysis
 - Built-in web map with live satellite and ring alert visualization
@@ -208,7 +207,7 @@ The default 16 dB threshold detects more bursts than gr-iridium, including weake
 | IDA frames (internal `--parsed`) | 605 | -- |
 | IDA frames (external iridium-parser.py) | 361 | 690 |
 
-At 18 dB (gr-iridium's default), burst detection counts are nearly identical. The ok rate now matches gr-iridium at 75% vs 74%. The external parser IDA gap (361 vs 690) reflects that gr-iridium's GNU Radio-based demodulator produces cleaner bits -- more frames survive standard BCH correction. Chase soft-decision decoding in `--parsed` mode compensates for this (605 vs 361), recovering nearly as many IDA frames from noisier bits. Use `--threshold=18` if ok rate percentage is more important than total frame count.
+At 18 dB (gr-iridium's default), burst detection counts are nearly identical. The ok rate now matches gr-iridium at 75% vs 74%. The external parser IDA gap (361 vs 690) reflects that gr-iridium's GNU Radio-based demodulator produces cleaner bits -- more frames survive standard BCH correction. Use `--threshold=18` if ok rate percentage is more important than total frame count.
 
 **A note on live ok% rates:** In live SDR capture, you may see ok\_avg of 35-50% with iridium-sniffer compared to 70-80% shown in gr-iridium guides. This is expected and not a problem. iridium-sniffer uses a lower default detection threshold (16 dB vs gr-iridium's 18 dB), which catches more weak bursts at the noise floor. These marginal detections lower the ok percentage but increase the total number of successfully decoded frames. The ok% statistic measures what fraction of detected bursts decode -- not how many frames you are actually recovering. What matters is decoded frames per second, and iridium-sniffer typically recovers more usable data than gr-iridium despite the lower ok% figure.
 
@@ -225,7 +224,7 @@ The AVX2 SIMD kernels provide a 1.9x CPU time reduction. GPU acceleration adds s
 
 All configurations produce identical demodulated output (frame count, bit content). GPU vs CPU may differ by a few frames due to floating-point rounding in the burst detection FFT.
 
-The IDA decoder uses Chase BCH soft-decision decoding. Standard BCH corrects up to 2 bit errors per 31-bit block. Chase decoding uses LLR (log-likelihood ratio) confidence from the demodulator to identify the least-reliable bit positions, flips them, and retries BCH correction. This recovers frames with 3+ corrupted positions where the errors cluster around low-confidence symbols. Combined with Gardner timing recovery, this yields 37% more IDA frames than `iridium-parser.py` on the same input (693 vs 507 at 16 dB threshold).
+The IDA decoder uses BCH(31,20) t=2 hard-decision error correction, identical to iridium-toolkit's `bch_repair()`. Standard BCH corrects up to 2 bit errors per 31-bit block. An experimental Chase soft-decision extension is available via `--chase` (see below), which uses per-bit amplitude scores from the demodulator to attempt recovery of blocks with more than 2 errors; it is off by default.  A high rate of false positive IRA data is to be expected if chase is enabled.
 
 ## Built-in Web Map (Beta)
 
@@ -515,7 +514,7 @@ Add `--acars` for human-readable text output locally while feeding:
 
 ## Parsed IDA Output
 
-The `--parsed` flag enables internal IDA frame decoding with Chase BCH error correction and outputs parsed IDA lines directly to stdout. This was added primarily for recovering ACARS, SBD, and other IDA-based message content without requiring the external Python `iridium-parser.py` pipeline.
+The `--parsed` flag enables internal IDA frame decoding and outputs parsed IDA lines directly to stdout. This was added primarily for recovering ACARS, SBD, and other IDA-based message content without requiring the external Python `iridium-parser.py` pipeline.
 
 ```bash
 # Direct to reassembler (no iridium-parser.py needed for IDA/ACARS/SBD)
@@ -537,7 +536,7 @@ Frame types **not yet decoded** by `--parsed` (these pass through as `RAW:` line
 
 For IRA and IBC, the `--web` map feature already decodes these frame types independently using a separate decoder. The `--parsed` limitation only affects stdout text output.
 
-If all frame types are needed on stdout (not just IDA), use the traditional pipeline: `iridium-sniffer | iridium-parser.py`. The internal IDA decoder produces 37% more IDA frames than the external parser thanks to Chase soft-decision BCH decoding, but the external parser handles all frame types.
+If all frame types are needed on stdout (not just IDA), use the traditional pipeline: `iridium-sniffer | iridium-parser.py`. The external parser handles all frame types; `--parsed` handles IDA only.
 
 In parsed mode, decoded IDA frames appear as `IDA:` lines with fields matching `iridium-parser.py` output format. Non-IDA frames continue to appear as `RAW:` lines. The `--parsed` flag adds no measurable overhead.
 
@@ -747,6 +746,8 @@ ZMQ:
 Output:
     --file-info=STR         file info string for RAW output (default: auto)
     --parsed                output parsed IDA lines (bypass iridium-parser.py)
+    --chase[=N]             experimental Chase soft-decision BCH (default off)
+                             N = flip-bits 0-7, default 5 when flag is present
     --save-bursts=DIR       save IQ samples of decoded bursts to directory
     --diagnostic            setup verification mode (suppresses RAW output)
     --no-gardner            disable Gardner timing recovery (enabled by default)

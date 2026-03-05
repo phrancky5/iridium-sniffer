@@ -33,6 +33,7 @@
 
 extern char *save_bursts_dir;
 extern int use_gardner;
+extern int use_chase;
 
 #define PLL_ALPHA           0.2f
 #define M_SQRT1_2f          0.70710678118654752f
@@ -484,21 +485,23 @@ int qpsk_demod(downmix_frame_t *in, demod_frame_t **out)
     map_symbols_to_bits(symbols, actual_symbols, bits);
 
     /* Step 7: Compute per-bit soft reliability (LLR magnitude) from PLL output.
-     * For QPSK: MSB reliability = |Re(symbol)|, LSB = |Im(symbol)|.
-     * Normalized so average constellation distance = 1.0. */
-    float *llr = malloc(n_bits * sizeof(float));
-    if (llr) {
-        /* Compute average magnitude for normalization */
-        float sum_mag = 0;
-        for (int i = 0; i < actual_symbols; i++)
-            sum_mag += cabsf(pll_out[i]);
-        float scale = (actual_symbols > 0 && sum_mag > 0)
-                    ? (M_SQRT1_2f / (sum_mag / actual_symbols))
-                    : 1.0f;
+     * Only generated when --chase is active; frame->llr is NULL otherwise and
+     * all Chase paths are bypassed at no cost. */
+    float *llr = NULL;
+    if (use_chase) {
+        llr = malloc(n_bits * sizeof(float));
+        if (llr) {
+            float sum_mag = 0;
+            for (int i = 0; i < actual_symbols; i++)
+                sum_mag += cabsf(pll_out[i]);
+            float scale = (actual_symbols > 0 && sum_mag > 0)
+                        ? (M_SQRT1_2f / (sum_mag / actual_symbols))
+                        : 1.0f;
 
-        for (int i = 0; i < actual_symbols; i++) {
-            llr[2 * i]     = fabsf(crealf(pll_out[i])) * scale;
-            llr[2 * i + 1] = fabsf(cimagf(pll_out[i])) * scale;
+            for (int i = 0; i < actual_symbols; i++) {
+                llr[2 * i]     = fabsf(crealf(pll_out[i])) * scale;
+                llr[2 * i + 1] = fabsf(cimagf(pll_out[i])) * scale;
+            }
         }
     }
 
