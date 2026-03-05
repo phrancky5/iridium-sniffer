@@ -462,6 +462,12 @@ int frame_decode(const demod_frame_t *frame, decoded_frame_t *out)
 
                 out->type = FRAME_IBC;
                 parse_ibc(bch_stream, bch_len, bc_type, &out->ibc);
+
+                /* Reject hard-BCH false positives: Iridium uses 48 spot beams
+                 * per satellite. beam_id outside [1-48] indicates garbage. */
+                if (out->ibc.beam_id < 1 || out->ibc.beam_id > 48)
+                    return 0;
+
                 return 1;
             }
         }
@@ -544,6 +550,12 @@ int frame_decode(const demod_frame_t *frame, decoded_frame_t *out)
 
             out->type = FRAME_IRA;
             parse_ira(bch_stream, bch_len, &out->ira);
+
+            /* Reject hard-BCH false positives: Iridium uses 48 spot beams
+             * per satellite. beam_id outside [1-48] indicates garbage. */
+            if (out->ira.beam_id < 1 || out->ira.beam_id > 48)
+                return 0;
+
             return 1;
         }
     }
