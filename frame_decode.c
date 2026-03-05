@@ -45,7 +45,8 @@
 #define BCH_HDR_DATA  3      /* 7 - 4 = 3 data bits */
 
 /* Chase decoder: flip up to N least-reliable bits, retry BCH */
-#define CHASE_FLIP_BITS 5    /* 2^5 = 32 combinations per failed block */
+#define CHASE_FLIP_MAX 7     /* Max of 7 (127 combinations); stack array sized to that max. */
+extern int use_chase;        /* Chase flip-bits count comes from the --chase=N runtime option */
 
 /* Access codes (24 bits after UW) */
 static const uint8_t access_dl[] = {
@@ -241,56 +242,9 @@ static int chase_bch_decode_p(const uint8_t *block32, const float *llr32,
         return syn_ra[syndrome].errs;
     }
 
-    /* Standard BCH failed -- Chase decode with soft info */
-    if (!llr32)
-        return -1;
-
-    /* Find CHASE_FLIP_BITS least-reliable positions within the 31-bit codeword.
-     * Simple partial selection sort (N=5 from 31 elements). */
-    int pos[31];
-    for (int i = 0; i < 31; i++)
-        pos[i] = i;
-
-    for (int i = 0; i < CHASE_FLIP_BITS; i++) {
-        int min_idx = i;
-        for (int j = i + 1; j < 31; j++) {
-            if (llr32[pos[j]] < llr32[pos[min_idx]])
-                min_idx = j;
-        }
-        int tmp = pos[i];
-        pos[i] = pos[min_idx];
-        pos[min_idx] = tmp;
-    }
-
-    /* Pre-compute flip masks for each candidate position.
-     * bits_to_uint puts bit[0] at bit position 30, bit[k] at position (30-k). */
-    uint32_t flip_mask[CHASE_FLIP_BITS];
-    for (int i = 0; i < CHASE_FLIP_BITS; i++)
-        flip_mask[i] = 1u << (30 - pos[i]);
-
-    /* Try all 2^CHASE_FLIP_BITS - 1 non-zero combinations */
-    uint32_t base_val = bits_to_uint(block32, 31);
-    for (int mask = 1; mask < (1 << CHASE_FLIP_BITS); mask++) {
-        uint32_t flipped = base_val;
-        for (int b = 0; b < CHASE_FLIP_BITS; b++) {
-            if (mask & (1 << b))
-                flipped ^= flip_mask[b];
-        }
-
-        syndrome = gf2_remainder(BCH_POLY_RA, flipped);
-        if (syndrome == 0) {
-            uint_to_bits(flipped >> 10, out_data, BCH_RA_DATA);
-            uint_to_bits(flipped & 0x3FF, out_check, 10);
-            return 0;
-        }
-        if (syndrome < 1024 && syn_ra[syndrome].errs >= 0) {
-            flipped ^= syn_ra[syndrome].locator;
-            uint_to_bits(flipped >> 10, out_data, BCH_RA_DATA);
-            uint_to_bits(flipped & 0x3FF, out_check, 10);
-            return syn_ra[syndrome].errs;
-        }
-    }
-
+    /* Chase is disabled for IRA/IBC frames -- false positives on
+     * unvalidated physical-layer frames corrupt satellite position data.
+     * Standard BCH (t=2) is the only correction applied here. */
     return -1;
 }
 
@@ -508,6 +462,12 @@ int frame_decode(const demod_frame_t *frame, decoded_frame_t *out)
 
                 out->type = FRAME_IBC;
                 parse_ibc(bch_stream, bch_len, bc_type, &out->ibc);
+
+                /* Reject hard-BCH false positives: Iridium uses 48 spot beams
+                 * per satellite. beam_id outside [1-48] indicates garbage. */
+                if (out->ibc.beam_id < 1 || out->ibc.beam_id > 48)
+                    return 0;
+
                 return 1;
             }
         }
@@ -590,6 +550,12 @@ int frame_decode(const demod_frame_t *frame, decoded_frame_t *out)
 
             out->type = FRAME_IRA;
             parse_ira(bch_stream, bch_len, &out->ira);
+
+            /* Reject hard-BCH false positives: Iridium uses 48 spot beams
+             * per satellite. beam_id outside [1-48] indicates garbage. */
+            if (out->ira.beam_id < 1 || out->ira.beam_id > 48)
+                return 0;
+
             return 1;
         }
     }

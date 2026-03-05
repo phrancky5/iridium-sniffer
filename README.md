@@ -16,7 +16,6 @@ Native GSMTAP output (`--gsmtap`) sends decoded IDA (Iridium Data) frames direct
 - Direct iridium-toolkit RAW output, compatible with iridium-parser.py and reassembler.py
 - Built-in ACARS/SBD decoding (`--acars`) with optional libacars-2 ARINC-622/ADS-C/CPDLC support
 - Parsed IDA output mode (`--parsed`) for direct reassembler.py piping (ACARS/SBD recovery)
-- Chase BCH soft-decision decoding recovers 37% more IDA frames than iridium-parser.py
 - Gardner timing recovery (enabled by default) for improved weak burst demodulation
 - Native GSMTAP/LAPDm output to Wireshark (`--gsmtap`) for IDA frame analysis
 - Built-in web map with live satellite and ring alert visualization
@@ -208,7 +207,7 @@ The default 16 dB threshold detects more bursts than gr-iridium, including weake
 | IDA frames (internal `--parsed`) | 605 | -- |
 | IDA frames (external iridium-parser.py) | 361 | 690 |
 
-At 18 dB (gr-iridium's default), burst detection counts are nearly identical. The ok rate now matches gr-iridium at 75% vs 74%. The external parser IDA gap (361 vs 690) reflects that gr-iridium's GNU Radio-based demodulator produces cleaner bits -- more frames survive standard BCH correction. Chase soft-decision decoding in `--parsed` mode compensates for this (605 vs 361), recovering nearly as many IDA frames from noisier bits. Use `--threshold=18` if ok rate percentage is more important than total frame count.
+At 18 dB (gr-iridium's default), burst detection counts are nearly identical. The ok rate now matches gr-iridium at 75% vs 74%. The external parser IDA gap (361 vs 690) reflects that gr-iridium's GNU Radio-based demodulator produces cleaner bits -- more frames survive standard BCH correction. Use `--threshold=18` if ok rate percentage is more important than total frame count.
 
 **A note on live ok% rates:** In live SDR capture, you may see ok\_avg of 35-50% with iridium-sniffer compared to 70-80% shown in gr-iridium guides. This is expected and not a problem. iridium-sniffer uses a lower default detection threshold (16 dB vs gr-iridium's 18 dB), which catches more weak bursts at the noise floor. These marginal detections lower the ok percentage but increase the total number of successfully decoded frames. The ok% statistic measures what fraction of detected bursts decode -- not how many frames you are actually recovering. What matters is decoded frames per second, and iridium-sniffer typically recovers more usable data than gr-iridium despite the lower ok% figure.
 
@@ -225,7 +224,7 @@ The AVX2 SIMD kernels provide a 1.9x CPU time reduction. GPU acceleration adds s
 
 All configurations produce identical demodulated output (frame count, bit content). GPU vs CPU may differ by a few frames due to floating-point rounding in the burst detection FFT.
 
-The IDA decoder uses Chase BCH soft-decision decoding. Standard BCH corrects up to 2 bit errors per 31-bit block. Chase decoding uses LLR (log-likelihood ratio) confidence from the demodulator to identify the least-reliable bit positions, flips them, and retries BCH correction. This recovers frames with 3+ corrupted positions where the errors cluster around low-confidence symbols. Combined with Gardner timing recovery, this yields 37% more IDA frames than `iridium-parser.py` on the same input (693 vs 507 at 16 dB threshold).
+The IDA decoder uses BCH(31,20) t=2 hard-decision error correction, identical to iridium-toolkit's `bch_repair()`. Standard BCH corrects up to 2 bit errors per 31-bit block. An experimental Chase soft-decision extension is available via `--chase` (see below), which uses per-bit amplitude scores from the demodulator to attempt recovery of blocks with more than 2 errors; it is off by default.  A high rate of false positive IRA data is to be expected if chase is enabled.
 
 ## Built-in Web Map (Beta)
 
@@ -534,7 +533,7 @@ Add `--acars` for human-readable text output locally while feeding:
 
 ## Parsed IDA Output
 
-The `--parsed` flag enables internal IDA frame decoding with Chase BCH error correction and outputs parsed IDA lines directly to stdout. This was added primarily for recovering ACARS, SBD, and other IDA-based message content without requiring the external Python `iridium-parser.py` pipeline.
+The `--parsed` flag enables internal IDA frame decoding and outputs parsed IDA lines directly to stdout. This was added primarily for recovering ACARS, SBD, and other IDA-based message content without requiring the external Python `iridium-parser.py` pipeline.
 
 ```bash
 # Direct to reassembler (no iridium-parser.py needed for IDA/ACARS/SBD)
@@ -556,7 +555,7 @@ Frame types **not yet decoded** by `--parsed` (these pass through as `RAW:` line
 
 For IRA and IBC, the `--web` map feature already decodes these frame types independently using a separate decoder. The `--parsed` limitation only affects stdout text output.
 
-If all frame types are needed on stdout (not just IDA), use the traditional pipeline: `iridium-sniffer | iridium-parser.py`. The internal IDA decoder produces 37% more IDA frames than the external parser thanks to Chase soft-decision BCH decoding, but the external parser handles all frame types.
+If all frame types are needed on stdout (not just IDA), use the traditional pipeline: `iridium-sniffer | iridium-parser.py`. The external parser handles all frame types; `--parsed` handles IDA only.
 
 In parsed mode, decoded IDA frames appear as `IDA:` lines with fields matching `iridium-parser.py` output format. Non-IDA frames continue to appear as `RAW:` lines. The `--parsed` flag adds no measurable overhead.
 
@@ -727,6 +726,8 @@ SDR options:
     -c, --center-freq=HZ    center frequency in Hz (default: 1622000000)
     -r, --sample-rate=HZ    sample rate in Hz (default: 10000000)
     -B, --bias-tee          enable bias tee power
+    --clock-source=SRC      clock reference: internal (default), external, gpsdo
+    --time-source=SRC       time/PPS reference: internal (default), external, gpsdo
 
 Gain options:
     --hackrf-lna=GAIN       HackRF LNA gain in dB (default: 40)
@@ -764,6 +765,8 @@ ZMQ:
 Output:
     --file-info=STR         file info string for RAW output (default: auto)
     --parsed                output parsed IDA lines (bypass iridium-parser.py)
+    --chase[=N]             experimental Chase soft-decision BCH (default off)
+                             N = flip-bits 0-7, default 5 when flag is present
     --save-bursts=DIR       save IQ samples of decoded bursts to directory
     --diagnostic            setup verification mode (suppresses RAW output)
     --no-gardner            disable Gardner timing recovery (enabled by default)
@@ -799,6 +802,34 @@ Any SDR that tunes to L-band (1616-1626.5 MHz) and samples at 2 MHz or above wil
 | BladeRF | 12-bit | 40 MHz | Good sensitivity |
 | RTL-SDR (via SoapySDR) | 8-bit | 2.4 MHz | Limited bandwidth, but works |
 | Airspy, LimeSDR, etc. | varies | varies | Via SoapySDR |
+
+## Clock and Time Source
+
+For improved Doppler positioning accuracy, SDRs with external reference inputs can be configured to use a disciplined clock and/or GPS-synchronized timestamps.
+
+```bash
+# USRP with Ettus GPSDO module (disciplined 10 MHz + GPS time)
+./iridium-sniffer -i usrp-B210-SERIAL --clock-source gpsdo --time-source gpsdo --position
+
+# USRP with external GPSDO feeding 10 MHz REF IN + PPS IN
+./iridium-sniffer -i usrp-B210-SERIAL --clock-source external --time-source external --position
+
+# bladeRF with external 10 MHz reference (disciplines onboard VCTCXO)
+./iridium-sniffer -i bladerf0 --clock-source external
+
+# bladeRF with 1 PPS reference (GPSDO mode)
+./iridium-sniffer -i bladerf0 --clock-source gpsdo
+```
+
+| Source | USRP | bladeRF | SoapySDR |
+|--------|------|---------|----------|
+| `internal` (default) | Onboard oscillator | Onboard VCTCXO | Device default |
+| `external` | 10 MHz REF IN SMA | VCTCXO tamer (10 MHz) | `setClockSource("external")` |
+| `gpsdo` | Ettus GPSDO module | VCTCXO tamer (1 PPS) | `setClockSource("gpsdo")` |
+
+When `--time-source` is set to `external` or `gpsdo`, hardware timestamps from the SDR are used for burst timing instead of the host system clock. This eliminates OS scheduling jitter and clock drift, providing sub-microsecond burst arrival times for Doppler positioning.
+
+When no clock/time source is specified, behavior is identical to previous versions -- no extra API calls are made.
 
 ## GPU Acceleration
 

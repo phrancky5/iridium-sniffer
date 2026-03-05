@@ -142,6 +142,7 @@ char *save_bursts_dir = NULL;
 int diagnostic_mode = 0;
 int use_gardner = 1;
 int parsed_mode = 0;
+int use_chase = 3;
 int position_enabled = 0;
 double position_height = 0;
 int acars_enabled = 0;
@@ -203,6 +204,10 @@ int beam_cache_lookup(uint64_t ts_ns, double *lat, double *lon,
     pthread_mutex_unlock(&beam_cache_lock);
     return found;
 }
+
+/* Clock/time source (CLOCK_SRC_INTERNAL/EXTERNAL/GPSDO from sdr.h) */
+int clock_source = CLOCK_SRC_INTERNAL;
+int time_source = CLOCK_SRC_INTERNAL;
 
 /* Threading state */
 volatile sig_atomic_t running = 1;
@@ -308,6 +313,7 @@ static void *spewer_thread(void *arg) {
             break;
         }
         s->num = r;
+        s->hw_timestamp_ns = 0;
         if (blocking_queue_put(&samples_queue, s) != 0) {
             free(s);
             break;
