@@ -721,7 +721,7 @@ static const char HTML_PAGE[] =
 "\n"
 "var beamLy=L.layerGroup().addTo(map);\n"
 "var mtLy=L.layerGroup().addTo(map);\n"
-"var acarsLy=L.layerGroup().addTo(map);\n"
+"var acarsLy=L.layerGroup();\n"
 "var pageLy=L.layerGroup().addTo(map);\n"
 "var rxLy=L.layerGroup().addTo(map);\n"
 "var satLy=L.layerGroup();\n"
