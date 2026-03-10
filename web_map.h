@@ -47,4 +47,19 @@ void mtpos_ida_cb(const uint8_t *data, int len, uint64_t timestamp,
                    double frequency, ir_direction_t direction,
                    float magnitude, void *user);
 
+/* Add a beam-based or ADS-C aircraft position fix from an ACARS message.
+ * reg: aircraft registration (tail number, no leading dots).
+ * flight: flight number or empty string if unknown.
+ * lat/lon: position (ADS-C GPS if adsc_pos=1, else beam center estimate).
+ * alt_ft: altitude in feet (-99999 if unknown).
+ * adsc_pos: 1 = GPS-quality ADS-C position, 0 = beam estimate (~200 km).
+ * oooi: OOOI event string ("OUT","OFF","ON","IN") or NULL if not an event.
+ * Thread-safe. */
+void web_map_add_aircraft(const char *reg, const char *flight,
+                           double lat, double lon,
+                           int sat_id, int beam_id,
+                           uint64_t timestamp_ns, double frequency,
+                           int alt_ft, int adsc_pos,
+                           const char *oooi);
+
 #endif

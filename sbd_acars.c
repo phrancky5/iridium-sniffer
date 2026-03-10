@@ -27,6 +27,7 @@
 #include <unistd.h>
 
 #include "sbd_acars.h"
+#include "web_map.h"
 
 #ifdef HAVE_LIBACARS
 #include <libacars/libacars.h>
@@ -40,7 +41,14 @@
 
 int acars_json = 0;
 extern int acars_enabled;
+extern int web_enabled;
 static const char *station = NULL;
+
+/* Beam cache lookup from main.c -- provides approximate aircraft position
+ * by correlating the ACARS message timestamp with the most recent IRA ground
+ * beam position.  Returns 1 on success, 0 if no match within 10 seconds. */
+extern int beam_cache_lookup(uint64_t ts_ns, double *lat, double *lon,
+                              int *sat_id, int *beam_id);
 
 /* ---- UDP JSON streaming (up to 4 endpoints) ---- */
 
@@ -410,6 +418,7 @@ static sbd_multi_t sbd_multi[SBD_MAX_MULTI];
 #ifdef HAVE_LIBACARS
 
 #include <libacars/json.h>
+#include <libacars/adsc.h>
 
 static la_reasm_ctx *reasm_ctx = NULL;
 
@@ -595,6 +604,77 @@ static void acars_parse_libacars(const uint8_t *data, int len, int ul,
                        msg->flight_id, msg->msg_num, msg->msg_num_seq,
                        0, timestamp, frequency, magnitude,
                        ir_hdr, ir_hdr_len);
+    }
+
+    /* Aircraft position (ADS-C GPS if available, else beam estimate) */
+    if (web_enabled && !msg->err && msg->reg[0]) {
+        double pos_lat = 0.0, pos_lon = 0.0;
+        int pos_sat = 0, pos_beam = 0;
+        int adsc_alt = -99999;
+        int adsc_pos = 0;
+        char adsc_flt[10] = {0};
+        char oooi_str[8] = {0};
+
+        /* Walk ADS-C proto tree for exact position, altitude, flight ID */
+        la_proto_node *an = la_proto_tree_find_adsc(tree);
+        if (an && an->data) {
+            la_adsc_msg_t *am = (la_adsc_msg_t *)an->data;
+            if (!am->err && am->tag_list) {
+                for (la_list *l = am->tag_list; l; l = l->next) {
+                    la_adsc_tag_t *t = (la_adsc_tag_t *)l->data;
+                    if (!t || !t->data) continue;
+                    /* Basic position report (downlink tags 7,9,10,18,19,20) */
+                    if (t->tag == 7  || t->tag == 9  || t->tag == 10 ||
+                        t->tag == 18 || t->tag == 19 || t->tag == 20) {
+                        la_adsc_basic_report_t *br =
+                            (la_adsc_basic_report_t *)t->data;
+                        pos_lat  = br->lat;
+                        pos_lon  = br->lon;
+                        adsc_alt = br->alt;  /* feet */
+                        adsc_pos = 1;
+                    }
+                    /* Flight ID (tag 12) -- use when msg->flight_id is empty */
+                    if (t->tag == 12) {
+                        la_adsc_flight_id_t *fi =
+                            (la_adsc_flight_id_t *)t->data;
+                        strncpy(adsc_flt, fi->id, 9);
+                        adsc_flt[9] = '\0';
+                    }
+                }
+            }
+        }
+
+        /* Detect OOOI events: Q0 label with OUT/OFF/ON/IN in text */
+        if (msg->label[0] == 'Q' && msg->label[1] == '0' && msg->txt) {
+            if      (strstr(msg->txt, "OUT")) strncpy(oooi_str, "OUT", 4);
+            else if (strstr(msg->txt, "OFF")) strncpy(oooi_str, "OFF", 4);
+            else if (strstr(msg->txt, " IN")) strncpy(oooi_str, "IN",  3);
+            else if (strstr(msg->txt, " ON")) strncpy(oooi_str, "ON",  3);
+        }
+
+        /* Position source: ADS-C GPS preferred, fall back to beam cache */
+        int have_pos;
+        if (adsc_pos) {
+            have_pos = 1;
+            /* Still look up sat/beam context from cache */
+            double bx, by;
+            beam_cache_lookup(timestamp, &bx, &by, &pos_sat, &pos_beam);
+        } else {
+            have_pos = beam_cache_lookup(timestamp, &pos_lat, &pos_lon,
+                                         &pos_sat, &pos_beam);
+        }
+
+        if (have_pos) {
+            const char *tail = msg->reg;
+            while (*tail == '.') tail++;
+            const char *flt = adsc_flt[0] ? adsc_flt :
+                              (msg->flight_id[0] ? msg->flight_id : "");
+            if (*tail)
+                web_map_add_aircraft(tail, flt, pos_lat, pos_lon,
+                                     pos_sat, pos_beam, timestamp, frequency,
+                                     adsc_alt, adsc_pos,
+                                     oooi_str[0] ? oooi_str : NULL);
+        }
     }
 
     la_proto_tree_destroy(tree);
@@ -992,6 +1072,29 @@ static void acars_parse_fallback(const uint8_t *data, int len, int ul,
                        ul, txt, txt_len, flight, msg_num, msg_num_seq,
                        errors, timestamp, frequency, magnitude,
                        hdr, hdr_len);
+    }
+
+    /* Aircraft beam-based position (requires --web, no errors) */
+    if (web_enabled && errors == 0 && len >= 8) {
+        /* Extract and strip leading dots from registration */
+        char reg_f[8] = {0};
+        int rstart = 1;
+        while (rstart < 8 && stripped[rstart] == '.')
+            rstart++;
+        int rlen = 8 - rstart;
+        if (rlen > 0) {
+            memcpy(reg_f, stripped + rstart, rlen);
+            reg_f[rlen] = '\0';
+        }
+        if (reg_f[0]) {
+            double bc_lat, bc_lon;
+            int bc_sat, bc_beam;
+            if (beam_cache_lookup(timestamp, &bc_lat, &bc_lon,
+                                  &bc_sat, &bc_beam))
+                web_map_add_aircraft(reg_f, "", bc_lat, bc_lon,
+                                     bc_sat, bc_beam, timestamp, frequency,
+                                     -99999, 0, NULL);
+        }
     }
 }
 
