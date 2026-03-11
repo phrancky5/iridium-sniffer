@@ -52,27 +52,6 @@ static sdrplay_api_Bw_MHzT pick_bandwidth(double sr)
     return sdrplay_api_BW_8_000;
 }
 
-/* Map a user-facing "gain dB" value to LNA state + IF gain reduction.
- * SDRplay uses gain reduction (higher = less gain), so we invert.
- * This is a simplified mapping; LNA states vary by model and band. */
-static void set_gain(sdrplay_api_RxChannelParamsT *ch, int gain_db)
-{
-    /* Clamp to reasonable range */
-    if (gain_db < 0)  gain_db = 0;
-    if (gain_db > 59) gain_db = 59;
-
-    /* IF gain reduction: 59 - gain_db (0 dB user gain = max reduction) */
-    ch->tunerParams.gain.gRdB = 59 - gain_db;
-    ch->tunerParams.gain.LNAstate = 0;  /* max LNA gain */
-
-    /* For moderate gain settings, back off the LNA */
-    if (gain_db < 20) {
-        ch->tunerParams.gain.LNAstate = 4;
-    } else if (gain_db < 30) {
-        ch->tunerParams.gain.LNAstate = 2;
-    }
-}
-
 /* ---- Stream callback ---- */
 static void stream_callback(short *xi, short *xq,
                              sdrplay_api_StreamCbParamsT *params,
@@ -236,8 +215,7 @@ void *sdrplay_setup(const char *serial)
     if (err != sdrplay_api_Success)
         errx(1, "sdrplay: cannot get API version: %s",
              sdrplay_api_GetErrorString(err));
-    if (verbose)
-        fprintf(stderr, "sdrplay: API version %.2f\n", ver);
+    fprintf(stderr, "sdrplay: API version %.2f\n", ver);
 
     /* Enumerate devices */
     sdrplay_api_DeviceT devices[SDRPLAY_MAX_DEVICES];
@@ -283,59 +261,142 @@ void *sdrplay_setup(const char *serial)
 
     sdrplay_api_UnlockDeviceApi();
 
-    /* Get device parameters */
+    /* Enable debug output for troubleshooting */
+    sdrplay_api_DebugEnable(ctx->device.dev, sdrplay_api_DbgLvl_Verbose);
+
+    /* Get device parameters (populated with defaults) */
     err = sdrplay_api_GetDeviceParams(ctx->device.dev, &ctx->params);
     if (err != sdrplay_api_Success)
         errx(1, "sdrplay: cannot get device params: %s",
              sdrplay_api_GetErrorString(err));
 
+    /* Init with default params -- all configuration applied via Update after */
+    sdrplay_api_CallbackFnsT cbFns;
+    cbFns.StreamACbFn = stream_callback;
+    cbFns.StreamBCbFn = stream_callback;  /* unused for single tuner */
+    cbFns.EventCbFn = event_callback;
+
+    err = sdrplay_api_Init(ctx->device.dev, &cbFns, ctx);
+    if (err != sdrplay_api_Success) {
+        sdrplay_api_ErrorInfoT *errInfo =
+            sdrplay_api_GetLastError(NULL);
+        if (errInfo)
+            warnx("sdrplay: Init error detail: %s (file=%s func=%s line=%d)",
+                  errInfo->message, errInfo->file,
+                  errInfo->function, errInfo->line);
+        errx(1, "sdrplay: cannot init device: %s",
+             sdrplay_api_GetErrorString(err));
+    }
+    ctx->initialized = 1;
+
+    /* Now apply all parameters via Update calls (SatDump pattern) */
     sdrplay_api_DevParamsT *devp = ctx->params->devParams;
     sdrplay_api_RxChannelParamsT *chp = ctx->params->rxChannelA;
+
+    /* Frequency */
+    chp->tunerParams.rfFreq.rfHz = center_freq;
+    err = sdrplay_api_Update(ctx->device.dev, ctx->device.tuner,
+                             sdrplay_api_Update_Tuner_Frf,
+                             sdrplay_api_Update_Ext1_None);
+    if (err != sdrplay_api_Success)
+        warnx("sdrplay: failed to set frequency: %s",
+              sdrplay_api_GetErrorString(err));
 
     /* Sample rate and bandwidth */
     devp->fsFreq.fsHz = samp_rate;
     chp->tunerParams.bwType = pick_bandwidth(samp_rate);
     chp->tunerParams.ifType = sdrplay_api_IF_Zero;
-
-    /* Center frequency */
-    chp->tunerParams.rfFreq.rfHz = center_freq;
-
-    /* Gain */
-    set_gain(chp, sdrplay_gain_val);
+    err = sdrplay_api_Update(ctx->device.dev, ctx->device.tuner,
+                             sdrplay_api_Update_Dev_Fs |
+                             sdrplay_api_Update_Tuner_BwType |
+                             sdrplay_api_Update_Tuner_IfType,
+                             sdrplay_api_Update_Ext1_None);
+    if (err != sdrplay_api_Success)
+        warnx("sdrplay: failed to set sample rate: %s",
+              sdrplay_api_GetErrorString(err));
 
     /* Disable AGC */
     chp->ctrlParams.agc.enable = sdrplay_api_AGC_DISABLE;
+    err = sdrplay_api_Update(ctx->device.dev, ctx->device.tuner,
+                             sdrplay_api_Update_Ctrl_Agc,
+                             sdrplay_api_Update_Ext1_None);
+    if (err != sdrplay_api_Success)
+        warnx("sdrplay: failed to disable AGC: %s",
+              sdrplay_api_GetErrorString(err));
 
-    /* DC and IQ correction enabled */
+    /* Gain: set IF gain reduction and LNA state */
+    int gain_db = sdrplay_gain_val;
+    if (gain_db < 0)  gain_db = 0;
+    if (gain_db > 59) gain_db = 59;
+    chp->tunerParams.gain.gRdB = 59 - gain_db;
+    chp->tunerParams.gain.LNAstate = 0;
+    if (gain_db < 20)
+        chp->tunerParams.gain.LNAstate = 4;
+    else if (gain_db < 30)
+        chp->tunerParams.gain.LNAstate = 2;
+    err = sdrplay_api_Update(ctx->device.dev, ctx->device.tuner,
+                             sdrplay_api_Update_Tuner_Gr,
+                             sdrplay_api_Update_Ext1_None);
+    if (err != sdrplay_api_Success)
+        warnx("sdrplay: failed to set gain: %s",
+              sdrplay_api_GetErrorString(err));
+
+    /* DC and IQ correction */
     chp->ctrlParams.dcOffset.DCenable = 1;
     chp->ctrlParams.dcOffset.IQenable = 1;
+    err = sdrplay_api_Update(ctx->device.dev, ctx->device.tuner,
+                             sdrplay_api_Update_Ctrl_DCoffsetIQimbalance,
+                             sdrplay_api_Update_Ext1_None);
+    if (err != sdrplay_api_Success)
+        warnx("sdrplay: failed to set DC offset: %s",
+              sdrplay_api_GetErrorString(err));
 
-    /* Bias tee (device-specific) */
+    /* Bias tee (device-specific, applied via Update) */
     if (bias_tee) {
+        sdrplay_api_ReasonForUpdateT reason = sdrplay_api_Update_None;
+        sdrplay_api_ReasonForUpdateExtension1T ext1 =
+            sdrplay_api_Update_Ext1_None;
+
         switch (ctx->device.hwVer) {
         case SDRPLAY_RSP1A_ID:
         case SDRPLAY_RSP1B_ID:
             chp->rsp1aTunerParams.biasTEnable = 1;
+            reason = sdrplay_api_Update_Rsp1a_BiasTControl;
             break;
         case SDRPLAY_RSP2_ID:
             chp->rsp2TunerParams.biasTEnable = 1;
+            reason = sdrplay_api_Update_Rsp2_BiasTControl;
             warnx("sdrplay: RSP2 bias tee only on Antenna B port");
             break;
         case SDRPLAY_RSPduo_ID:
             chp->rspDuoTunerParams.biasTEnable = 1;
+            reason = sdrplay_api_Update_RspDuo_BiasTControl;
             break;
         case SDRPLAY_RSPdx_ID:
         case SDRPLAY_RSPdxR2_ID:
             devp->rspDxParams.biasTEnable = 1;
+            ext1 = sdrplay_api_Update_RspDx_BiasTControl;
             warnx("sdrplay: RSPdx bias tee only on Antenna B port");
             break;
         default:
             warnx("sdrplay: bias tee not supported on this model");
             break;
         }
-        if (verbose)
-            fprintf(stderr, "sdrplay: bias tee enabled\n");
+
+        if (reason != sdrplay_api_Update_None ||
+            ext1 != sdrplay_api_Update_Ext1_None) {
+            err = sdrplay_api_Update(ctx->device.dev, ctx->device.tuner,
+                                     reason, ext1);
+            if (err != sdrplay_api_Success)
+                warnx("sdrplay: failed to enable bias tee: %s",
+                      sdrplay_api_GetErrorString(err));
+            else
+                fprintf(stderr, "sdrplay: bias tee enabled\n");
+        }
     }
+
+    /* Turn off debug now that setup is complete */
+    sdrplay_api_DebugEnable(ctx->device.dev, sdrplay_api_DbgLvl_Disable);
 
     const char *model;
     switch (ctx->device.hwVer) {
@@ -358,26 +419,11 @@ void *sdrplay_setup(const char *serial)
 /* ---- Streaming thread ---- */
 void *sdrplay_stream_thread(void *arg)
 {
-    sdrplay_ctx_t *ctx = (sdrplay_ctx_t *)arg;
-    sdrplay_api_ErrT err;
+    (void)arg;
 
-    /* Set up callbacks */
-    sdrplay_api_CallbackFnsT cbFns;
-    cbFns.StreamACbFn = stream_callback;
-    cbFns.StreamBCbFn = stream_callback;  /* unused for single tuner */
-    cbFns.EventCbFn = event_callback;
-
-    /* Init starts streaming immediately */
-    err = sdrplay_api_Init(ctx->device.dev, &cbFns, ctx);
-    if (err != sdrplay_api_Success)
-        errx(1, "sdrplay: cannot init streaming: %s",
-             sdrplay_api_GetErrorString(err));
-    ctx->initialized = 1;
-
-    if (verbose)
-        fprintf(stderr, "sdrplay: streaming started\n");
-
-    /* Block until told to stop. Callbacks deliver samples. */
+    /* Streaming is already active from Init in setup.
+     * Callbacks deliver samples directly via push_samples().
+     * This thread just blocks until shutdown. */
     while (running)
         usleep(100000);
 
