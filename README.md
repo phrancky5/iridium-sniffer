@@ -22,6 +22,7 @@ Native GSMTAP output (`--gsmtap`) sends decoded IDA (Iridium Data) frames direct
 - Doppler-based receiver positioning from decoded satellite signals (`--position`)
 - GPU-accelerated FFT burst detection (OpenCL or Vulkan)
 - ZMQ PUB/SUB output (`--zmq`) for multi-consumer iridium-toolkit compatibility
+- ZMQ SUB and VITA 49 (VRT) network IQ input for remote SDR and distributed setups
 - Multi-threaded architecture: detection, downmix pool, demodulation, stats
 - HackRF, BladeRF, USRP, and SoapySDR support
 - Reads ci8, ci16, and cf32 IQ files with auto-detection from file extension
@@ -730,6 +731,25 @@ Receive IQ samples from a remote SDR over a ZMQ PUB socket. This enables running
 
 The sample format (`--format`) and sample rate (`-r`) must match what the publisher is sending. GNU Radio's `zeromq.pub_sink` typically outputs cf32 (complex float32).
 
+### VITA 49 (VRT) Input
+
+Receive IQ samples via VITA 49 / VRT signal data packets over UDP. This enables receiving from SDR platforms that output VITA 49, such as FlexRadio, REDHAWK SCA, or custom VRT sources.
+
+```bash
+# Receive cf32 IQ via VITA 49 on default port (0.0.0.0:4991)
+./iridium-sniffer --vita49 --format=cf32 -r 10000000
+
+# Specify bind address and port
+./iridium-sniffer --vita49=192.168.1.100:5000 --format=cf32 -r 10000000
+
+# With web map
+./iridium-sniffer --vita49 --format=cf32 -r 10000000 --web
+```
+
+The parser accepts VRT signal data packets (type 0x0 and 0x1) and silently skips context and command packets. The `--format` and `-r` must match the IQ sample format within the VRT payload. Sequence gap detection is built in and logged at shutdown.
+
+No external libraries are required -- VITA 49 header parsing uses only POSIX sockets.
+
 ## Command Reference
 
 ```
@@ -786,6 +806,9 @@ ACARS:
 ZMQ:
     --zmq[=ENDPOINT]        publish output via ZMQ PUB (default: tcp://*:7006)
     --zmq-sub[=ENDPOINT]    receive IQ samples via ZMQ SUB (default: tcp://127.0.0.1:5555)
+
+VITA 49:
+    --vita49[=IP:PORT]      receive IQ via VITA 49 (VRT) UDP (default: 0.0.0.0:4991)
 
 Output:
     --file-info=STR         file info string for RAW output (default: auto)

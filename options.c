@@ -105,6 +105,8 @@ extern int zmq_enabled;
 extern char *zmq_endpoint;
 extern int zmq_sub_enabled;
 extern char *zmq_sub_endpoint;
+extern int vita49_enabled;
+extern char *vita49_endpoint;
 extern int clock_source;
 extern int time_source;
 
@@ -182,6 +184,8 @@ static void usage(int exitcode) {
 "    --zmq-sub[=ENDPOINT]  receive IQ samples via ZMQ SUB socket\n"
 "                             (default: tcp://127.0.0.1:5555, use with -f and -r)\n"
 #endif
+"    --vita49[=IP:PORT]    receive IQ via VITA 49 (VRT) UDP packets\n"
+"                             (default: 0.0.0.0:4991, use with --format and -r)\n"
 "    -v, --verbose           verbose output to stderr\n"
 "    -h, --help              show this help\n"
 "    --list                  list available SDR interfaces\n"
@@ -248,6 +252,7 @@ void parse_options(int argc, char **argv) {
         OPT_CLOCK_SOURCE,
         OPT_TIME_SOURCE,
         OPT_SDRPLAY_GAIN,
+        OPT_VITA49,
     };
 
     static const struct option longopts[] = {
@@ -291,6 +296,7 @@ void parse_options(int argc, char **argv) {
         { "clock-source",   required_argument, NULL, OPT_CLOCK_SOURCE },
         { "time-source",    required_argument, NULL, OPT_TIME_SOURCE },
         { "sdrplay-gain",   required_argument, NULL, OPT_SDRPLAY_GAIN },
+        { "vita49",         optional_argument, NULL, OPT_VITA49 },
         { NULL,             0,                 NULL, 0 }
     };
 
@@ -539,6 +545,12 @@ void parse_options(int argc, char **argv) {
 #endif
                 break;
 
+            case OPT_VITA49:
+                vita49_enabled = 1;
+                if (optarg)
+                    vita49_endpoint = strdup(optarg);
+                break;
+
             case OPT_SOAPY_SETTING:
 #ifdef HAVE_SOAPYSDR
                 if (soapy_setting_count >= SOAPY_SETTINGS_MAX)
@@ -611,7 +623,7 @@ void parse_options(int argc, char **argv) {
     )
         live = 1;
 
-    if (!live && in_file == NULL && !zmq_sub_enabled)
+    if (!live && in_file == NULL && !zmq_sub_enabled && !vita49_enabled)
         usage(1);
 
     if (live && in_file != NULL)
@@ -619,6 +631,12 @@ void parse_options(int argc, char **argv) {
 
     if (zmq_sub_enabled && (live || in_file != NULL))
         errx(1, "Cannot use --zmq-sub with --live or --file");
+
+    if (vita49_enabled && (live || in_file != NULL))
+        errx(1, "Cannot use --vita49 with --live or --file");
+
+    if (vita49_enabled && zmq_sub_enabled)
+        errx(1, "Cannot use --vita49 with --zmq-sub");
 
     /* Auto-detect format from file extension if not explicitly specified */
     if (in_filename && !format_explicit) {

@@ -118,6 +118,7 @@ set(SOURCES
     ${PROJECT_SOURCE_DIR}/sbd_acars.c
     ${PROJECT_SOURCE_DIR}/window_func.c
     ${PROJECT_SOURCE_DIR}/simd_generic.c
+    ${PROJECT_SOURCE_DIR}/vita49.c
 )
 
 # AVX2 SIMD kernels (x86_64 only, compiled with -mavx2 -mfma)

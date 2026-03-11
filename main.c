@@ -48,6 +48,7 @@
 #include "frame_output.h"
 #include "frame_decode.h"
 #include "web_map.h"
+#include "vita49.h"
 #include "ida_decode.h"
 #include "doppler_pos.h"
 #include "gsmtap.h"
@@ -172,6 +173,10 @@ char *zmq_endpoint = NULL;
 int zmq_sub_enabled = 0;
 char *zmq_sub_endpoint = NULL;
 #define ZMQ_SUB_DEFAULT_ENDPOINT "tcp://127.0.0.1:5555"
+
+/* VITA 49 (VRT) UDP input */
+int vita49_enabled = 0;
+char *vita49_endpoint = NULL;
 
 /* ---- Beam cache for ACARS aircraft position correlation ---- */
 /* Stores recent IRA ground beam positions (alt < 100) so the ACARS
@@ -937,6 +942,12 @@ int main(int argc, char **argv) {
 #endif
     }
 #endif
+    else if (vita49_enabled) {
+        pthread_create(&spewer, NULL, vita49_thread, NULL);
+#ifdef __linux__
+        pthread_setname_np(spewer, "vita49");
+#endif
+    }
 
     /* Wait for signal */
     while (running) {
@@ -992,6 +1003,8 @@ int main(int argc, char **argv) {
     if (zmq_sub_enabled)
         pthread_join(spewer, NULL);
 #endif
+    if (vita49_enabled)
+        pthread_join(spewer, NULL);
     pthread_join(detector, NULL);
 
     /* Wait for burst_queue to drain before closing */
