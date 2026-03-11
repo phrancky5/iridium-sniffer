@@ -36,6 +36,9 @@
 #ifdef HAVE_SOAPYSDR
 #include "soapysdr.h"
 #endif
+#ifdef HAVE_SDRPLAY
+#include "sdrplay.h"
+#endif
 
 #include "sdr.h"
 #include "iridium.h"
@@ -115,6 +118,9 @@ char *soapy_setting_keys[SOAPY_SETTINGS_MAX];
 char *soapy_setting_vals[SOAPY_SETTINGS_MAX];
 int soapy_setting_count = 0;
 #endif
+#ifdef HAVE_SDRPLAY
+char *sdrplay_serial = NULL;
+#endif
 
 /* Per-SDR gain settings (defaults from gr-iridium example configs) */
 int hackrf_lna_gain = 40;
@@ -123,6 +129,7 @@ int hackrf_amp_enable = 0;
 int bladerf_gain_val = 40;
 int usrp_gain_val = 40;
 double soapy_gain_val = 30.0;
+int sdrplay_gain_val = 40;
 int bias_tee = 0;
 int web_enabled = 0;
 int web_port = 8888;
@@ -616,6 +623,10 @@ int main(int argc, char **argv) {
     SoapySDRDevice *soapy = NULL;
     pthread_t soapy_thread;
 #endif
+#ifdef HAVE_SDRPLAY
+    void *sdrplay_ctx = NULL;
+    pthread_t sdrplay_thread;
+#endif
 
     signal(SIGINT, sig_handler);
     signal(SIGTERM, sig_handler);
@@ -777,6 +788,13 @@ int main(int argc, char **argv) {
             sdr_started = 1;
         }
 #endif
+#ifdef HAVE_SDRPLAY
+        if (!sdr_started && sdrplay_serial) {
+            sdrplay_ctx = sdrplay_setup(sdrplay_serial);
+            pthread_create(&sdrplay_thread, NULL, sdrplay_stream_thread, sdrplay_ctx);
+            sdr_started = 1;
+        }
+#endif
 #ifdef HAVE_HACKRF
         if (!sdr_started && serial != NULL) {
             hackrf = hackrf_setup();
@@ -830,6 +848,12 @@ int main(int argc, char **argv) {
         if (soapy != NULL) {
             pthread_join(soapy_thread, NULL);
             soapy_close(soapy);
+        }
+#endif
+#ifdef HAVE_SDRPLAY
+        if (sdrplay_ctx != NULL) {
+            pthread_join(sdrplay_thread, NULL);
+            sdrplay_close(sdrplay_ctx);
         }
 #endif
     }

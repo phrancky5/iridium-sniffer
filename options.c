@@ -30,6 +30,9 @@
 #ifdef HAVE_SOAPYSDR
 #include "soapysdr.h"
 #endif
+#ifdef HAVE_SDRPLAY
+#include "sdrplay.h"
+#endif
 
 typedef enum {
     FMT_CI8 = 0,
@@ -61,6 +64,9 @@ extern char *soapy_setting_keys[SOAPY_SETTINGS_MAX];
 extern char *soapy_setting_vals[SOAPY_SETTINGS_MAX];
 extern int soapy_setting_count;
 #endif
+#ifdef HAVE_SDRPLAY
+extern char *sdrplay_serial;
+#endif
 
 extern int hackrf_lna_gain;
 extern int hackrf_vga_gain;
@@ -68,6 +74,7 @@ extern int hackrf_amp_enable;
 extern int bladerf_gain_val;
 extern int usrp_gain_val;
 extern double soapy_gain_val;
+extern int sdrplay_gain_val;
 extern int bias_tee;
 extern int use_gpu;
 extern int no_simd;
@@ -114,6 +121,7 @@ static void usage(int exitcode) {
 "    -i, --interface=IFACE   SDR to use (see --list for available devices):\n"
 "                             soapy-N (by index) or soapy:driver=X,serial=Y (by args)\n"
 "                             hackrf-SERIAL, bladerfN, usrp-PRODUCT-SERIAL\n"
+"                             sdrplay-SERIAL (native SDRplay API)\n"
 "    -c, --center-freq=HZ    center frequency in Hz (default: 1622000000)\n"
 "    -r, --sample-rate=HZ    sample rate in Hz (default: 10000000)\n"
 "    -B, --bias-tee           enable bias tee power\n"
@@ -127,6 +135,7 @@ static void usage(int exitcode) {
 "    --bladerf-gain=GAIN     BladeRF gain in dB (default: 40)\n"
 "    --usrp-gain=GAIN        USRP gain in dB (default: 40)\n"
 "    --soapy-gain=GAIN       SoapySDR gain in dB (default: 30)\n"
+"    --sdrplay-gain=GAIN    SDRplay gain in dB (default: 40)\n"
 "    --soapy-setting=K:V    SoapySDR device setting (repeatable)\n"
 "                             e.g. bitpack:true (Airspy), biastee_rx:true (bladeRF)\n"
 "\n"
@@ -194,6 +203,9 @@ static void list_interfaces(void) {
 #ifdef HAVE_SOAPYSDR
     soapy_list();
 #endif
+#ifdef HAVE_SDRPLAY
+    sdrplay_list();
+#endif
     exit(0);
 }
 
@@ -232,6 +244,7 @@ void parse_options(int argc, char **argv) {
         OPT_ZMQ,
         OPT_CLOCK_SOURCE,
         OPT_TIME_SOURCE,
+        OPT_SDRPLAY_GAIN,
     };
 
     static const struct option longopts[] = {
@@ -273,6 +286,7 @@ void parse_options(int argc, char **argv) {
         { "zmq",            optional_argument, NULL, OPT_ZMQ },
         { "clock-source",   required_argument, NULL, OPT_CLOCK_SOURCE },
         { "time-source",    required_argument, NULL, OPT_TIME_SOURCE },
+        { "sdrplay-gain",   required_argument, NULL, OPT_SDRPLAY_GAIN },
         { NULL,             0,                 NULL, 0 }
     };
 
@@ -315,6 +329,12 @@ void parse_options(int argc, char **argv) {
                 }
                 if (strstr(optarg, "soapy-") == optarg) {
                     soapy_num = atoi(optarg + 6);
+                    break;
+                }
+#endif
+#ifdef HAVE_SDRPLAY
+                if (strstr(optarg, "sdrplay-") == optarg) {
+                    sdrplay_serial = strdup(optarg + 8);
                     break;
                 }
 #endif
@@ -367,6 +387,7 @@ void parse_options(int argc, char **argv) {
             case OPT_BLADERF_GAIN: bladerf_gain_val = atoi(optarg); break;
             case OPT_USRP_GAIN:   usrp_gain_val    = atoi(optarg); break;
             case OPT_SOAPY_GAIN:  soapy_gain_val   = atof(optarg); break;
+            case OPT_SDRPLAY_GAIN: sdrplay_gain_val = atoi(optarg); break;
             case OPT_NO_GPU:      use_gpu = 0;                       break;
             case OPT_NO_SIMD:     no_simd = 1;                       break;
             case OPT_CHASE:
@@ -569,6 +590,9 @@ void parse_options(int argc, char **argv) {
 #endif
 #ifdef HAVE_SOAPYSDR
         || soapy_num >= 0 || soapy_args
+#endif
+#ifdef HAVE_SDRPLAY
+        || sdrplay_serial
 #endif
     )
         live = 1;
