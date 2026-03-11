@@ -168,6 +168,11 @@ int zmq_enabled = 0;
 char *zmq_endpoint = NULL;
 #define ZMQ_DEFAULT_ENDPOINT "tcp://*:7006"
 
+/* ZMQ SUB input for receiving IQ samples over network */
+int zmq_sub_enabled = 0;
+char *zmq_sub_endpoint = NULL;
+#define ZMQ_SUB_DEFAULT_ENDPOINT "tcp://127.0.0.1:5555"
+
 /* ---- Beam cache for ACARS aircraft position correlation ---- */
 /* Stores recent IRA ground beam positions (alt < 100) so the ACARS
  * callback can correlate a received message with the beam it arrived on. */
@@ -331,6 +336,123 @@ static void *spewer_thread(void *arg) {
     kill(self_pid, SIGINT);
     return NULL;
 }
+
+/* ---- ZMQ SUB input thread ---- */
+#ifdef HAVE_ZMQ
+#include <zmq.h>
+
+static void *zmq_sub_ctx = NULL;
+static void *zmq_sub_socket = NULL;
+
+static void *zmq_sub_thread(void *arg) {
+    (void)arg;
+
+    zmq_sub_ctx = zmq_ctx_new();
+    if (!zmq_sub_ctx) {
+        warnx("zmq-sub: cannot create context");
+        running = 0;
+        kill(self_pid, SIGINT);
+        return NULL;
+    }
+
+    zmq_sub_socket = zmq_socket(zmq_sub_ctx, ZMQ_SUB);
+    if (!zmq_sub_socket) {
+        warnx("zmq-sub: cannot create socket");
+        zmq_ctx_destroy(zmq_sub_ctx);
+        zmq_sub_ctx = NULL;
+        running = 0;
+        kill(self_pid, SIGINT);
+        return NULL;
+    }
+
+    /* Subscribe to all messages */
+    zmq_setsockopt(zmq_sub_socket, ZMQ_SUBSCRIBE, "", 0);
+
+    const char *ep = zmq_sub_endpoint ? zmq_sub_endpoint
+                                      : ZMQ_SUB_DEFAULT_ENDPOINT;
+    if (zmq_connect(zmq_sub_socket, ep) != 0) {
+        warnx("zmq-sub: cannot connect to %s: %s", ep, zmq_strerror(errno));
+        zmq_close(zmq_sub_socket);
+        zmq_ctx_destroy(zmq_sub_ctx);
+        zmq_sub_socket = NULL;
+        zmq_sub_ctx = NULL;
+        running = 0;
+        kill(self_pid, SIGINT);
+        return NULL;
+    }
+
+    fprintf(stderr, "zmq-sub: connected to %s (format=%s)\n", ep,
+            iq_format == FMT_CF32 ? "cf32" :
+            iq_format == FMT_CI16 ? "cs16" : "cs8");
+
+    while (running) {
+        zmq_msg_t msg;
+        zmq_msg_init(&msg);
+
+        int rc = zmq_msg_recv(&msg, zmq_sub_socket, 0);
+        if (rc < 0) {
+            zmq_msg_close(&msg);
+            if (errno == EINTR)
+                continue;
+            break;
+        }
+
+        size_t len = zmq_msg_size(&msg);
+        void *data = zmq_msg_data(&msg);
+
+        sample_buf_t *s;
+        size_t num_samples;
+
+        switch (iq_format) {
+        case FMT_CF32:
+            /* 8 bytes per sample (2 x float32) */
+            num_samples = len / 8;
+            if (num_samples == 0) { zmq_msg_close(&msg); continue; }
+            s = malloc(sizeof(*s) + num_samples * 8);
+            s->format = SAMPLE_FMT_FLOAT;
+            memcpy(s->samples, data, num_samples * 8);
+            break;
+
+        case FMT_CI16: {
+            /* 4 bytes per sample -> convert to int8 */
+            num_samples = len / 4;
+            if (num_samples == 0) { zmq_msg_close(&msg); continue; }
+            s = malloc(sizeof(*s) + num_samples * 2);
+            s->format = SAMPLE_FMT_INT8;
+            int16_t *src = (int16_t *)data;
+            for (size_t i = 0; i < num_samples * 2; i++)
+                s->samples[i] = (int8_t)(src[i] >> 8);
+            break;
+        }
+
+        case FMT_CI8:
+        default:
+            /* 2 bytes per sample (native int8) */
+            num_samples = len / 2;
+            if (num_samples == 0) { zmq_msg_close(&msg); continue; }
+            s = malloc(sizeof(*s) + num_samples * 2);
+            s->format = SAMPLE_FMT_INT8;
+            memcpy(s->samples, data, num_samples * 2);
+            break;
+        }
+
+        zmq_msg_close(&msg);
+
+        s->num = num_samples;
+        s->hw_timestamp_ns = 0;
+        push_samples(s);
+    }
+
+    zmq_close(zmq_sub_socket);
+    zmq_ctx_destroy(zmq_sub_ctx);
+    zmq_sub_socket = NULL;
+    zmq_sub_ctx = NULL;
+
+    running = 0;
+    kill(self_pid, SIGINT);
+    return NULL;
+}
+#endif /* HAVE_ZMQ */
 
 /* ---- IDA/GSMTAP state ---- */
 
@@ -807,6 +929,14 @@ int main(int argc, char **argv) {
         pthread_setname_np(spewer, "spewer");
 #endif
     }
+#ifdef HAVE_ZMQ
+    else if (zmq_sub_enabled) {
+        pthread_create(&spewer, NULL, zmq_sub_thread, NULL);
+#ifdef __linux__
+        pthread_setname_np(spewer, "zmq-sub");
+#endif
+    }
+#endif
 
     /* Wait for signal */
     while (running) {
@@ -858,6 +988,10 @@ int main(int argc, char **argv) {
     blocking_queue_close(&samples_queue);
     if (!live && in_file != NULL)
         pthread_join(spewer, NULL);
+#ifdef HAVE_ZMQ
+    if (zmq_sub_enabled)
+        pthread_join(spewer, NULL);
+#endif
     pthread_join(detector, NULL);
 
     /* Wait for burst_queue to drain before closing */

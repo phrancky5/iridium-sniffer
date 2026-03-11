@@ -103,6 +103,8 @@ extern char *feed_tcp_host;
 extern int feed_tcp_port;
 extern int zmq_enabled;
 extern char *zmq_endpoint;
+extern int zmq_sub_enabled;
+extern char *zmq_sub_endpoint;
 extern int clock_source;
 extern int time_source;
 
@@ -177,6 +179,8 @@ static void usage(int exitcode) {
 #ifdef HAVE_ZMQ
 "    --zmq[=ENDPOINT]     publish output via ZMQ PUB socket for multi-consumer\n"
 "                             (default: tcp://*:7006, compatible with iridium-toolkit)\n"
+"    --zmq-sub[=ENDPOINT]  receive IQ samples via ZMQ SUB socket\n"
+"                             (default: tcp://127.0.0.1:5555, use with -f and -r)\n"
 #endif
 "    -v, --verbose           verbose output to stderr\n"
 "    -h, --help              show this help\n"
@@ -240,6 +244,7 @@ void parse_options(int argc, char **argv) {
         OPT_STATION,
         OPT_SOAPY_SETTING,
         OPT_ZMQ,
+        OPT_ZMQ_SUB,
         OPT_CLOCK_SOURCE,
         OPT_TIME_SOURCE,
         OPT_SDRPLAY_GAIN,
@@ -282,6 +287,7 @@ void parse_options(int argc, char **argv) {
         { "station",        required_argument, NULL, OPT_STATION },
         { "soapy-setting",  required_argument, NULL, OPT_SOAPY_SETTING },
         { "zmq",            optional_argument, NULL, OPT_ZMQ },
+        { "zmq-sub",        optional_argument, NULL, OPT_ZMQ_SUB },
         { "clock-source",   required_argument, NULL, OPT_CLOCK_SOURCE },
         { "time-source",    required_argument, NULL, OPT_TIME_SOURCE },
         { "sdrplay-gain",   required_argument, NULL, OPT_SDRPLAY_GAIN },
@@ -523,6 +529,16 @@ void parse_options(int argc, char **argv) {
 #endif
                 break;
 
+            case OPT_ZMQ_SUB:
+#ifdef HAVE_ZMQ
+                zmq_sub_enabled = 1;
+                if (optarg)
+                    zmq_sub_endpoint = strdup(optarg);
+#else
+                errx(1, "--zmq-sub requires ZMQ support (install libzmq3-dev and rebuild)");
+#endif
+                break;
+
             case OPT_SOAPY_SETTING:
 #ifdef HAVE_SOAPYSDR
                 if (soapy_setting_count >= SOAPY_SETTINGS_MAX)
@@ -595,11 +611,14 @@ void parse_options(int argc, char **argv) {
     )
         live = 1;
 
-    if (!live && in_file == NULL)
+    if (!live && in_file == NULL && !zmq_sub_enabled)
         usage(1);
 
     if (live && in_file != NULL)
         errx(1, "Cannot use both --live and --file");
+
+    if (zmq_sub_enabled && (live || in_file != NULL))
+        errx(1, "Cannot use --zmq-sub with --live or --file");
 
     /* Auto-detect format from file extension if not explicitly specified */
     if (in_filename && !format_explicit) {
