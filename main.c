@@ -137,12 +137,8 @@ int gsmtap_enabled = 0;
 char *gsmtap_host = NULL;
 int gsmtap_port = GSMTAP_DEFAULT_PORT;
 
-/* GPU acceleration: enabled by default when compiled with GPU support */
-#ifdef USE_GPU
+/* GPU acceleration: enabled by default, loaded via dlopen plugin at runtime */
 int use_gpu = 1;
-#else
-int use_gpu = 0;
-#endif
 
 int no_simd = 0;
 char *save_bursts_dir = NULL;

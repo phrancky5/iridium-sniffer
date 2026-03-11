@@ -141,9 +141,7 @@ static void usage(int exitcode) {
 "\n"
 "Detection options:\n"
 "    -d, --threshold=DB      burst detection threshold in dB (default: 16.0)\n"
-#ifdef USE_GPU
 "    --no-gpu                disable GPU acceleration (use CPU FFTW)\n"
-#endif
 "    --no-simd               disable SIMD acceleration (use scalar kernels)\n"
 "    --chase[=N]             enable Chase soft-decision BCH decoder (experimental)\n"
 "                             N = flip-bits count, 0-7 (default 5 = 31 combos).\n"

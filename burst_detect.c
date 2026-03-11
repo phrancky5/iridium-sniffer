@@ -19,6 +19,7 @@
 #include <string.h>
 #include <time.h>
 
+#include <dlfcn.h>
 #include <fftw3.h>
 
 #include "burst_detect.h"
@@ -30,9 +31,8 @@
 
 #include "blocking_queue.h"
 
-#ifdef USE_GPU
-#include "burst_fft.h"
-#endif
+/* Forward declaration for opaque GPU context (loaded via dlopen plugin) */
+typedef struct gpu_burst_fft gpu_burst_fft_t;
 
 /* ---- Internal types ---- */
 
@@ -125,14 +125,17 @@ struct _burst_detector {
     uint64_t start_time_ns;     /* nanosecond timestamp at sample 0 */
     uint64_t pending_hw_ts;     /* hardware timestamp for next feed (0=none) */
 
-#ifdef USE_GPU
-    /* GPU acceleration */
+    /* GPU plugin (loaded via dlopen) */
+    void *gpu_handle;           /* dlopen handle */
     gpu_burst_fft_t *gpu;
     int gpu_batch_size;         /* max frames per GPU dispatch */
     int gpu_batch_count;        /* frames accumulated so far */
     float *gpu_batch_input;     /* batch_size * fft_size * 2 floats (complex) */
     float *gpu_batch_output;    /* batch_size * fft_size floats (magnitude) */
-#endif
+    /* Function pointers from plugin */
+    gpu_burst_fft_t *(*gpu_create)(int, int, const float *);
+    void (*gpu_destroy)(gpu_burst_fft_t *);
+    int (*gpu_process)(gpu_burst_fft_t *, const float *, float *, int);
 };
 
 /* ---- Externs for threading integration ---- */
@@ -167,6 +170,37 @@ static int peak_cmp_desc(const void *a, const void *b) {
     float mb = ((const peak_t *)b)->relative_magnitude;
     if (ma > mb) return -1;
     if (ma < mb) return 1;
+    return 0;
+}
+
+/* ---- GPU plugin loader ---- */
+
+static int gpu_plugin_load(burst_detector_t *d)
+{
+    const char *names[] = {
+        "libiridium-sniffer-gpu.so",   /* standard library path */
+        "./libiridium-sniffer-gpu.so", /* current directory */
+        NULL
+    };
+
+    for (int i = 0; names[i]; i++) {
+        d->gpu_handle = dlopen(names[i], RTLD_NOW);
+        if (d->gpu_handle) break;
+    }
+
+    if (!d->gpu_handle)
+        return -1;
+
+    d->gpu_create  = dlsym(d->gpu_handle, "gpu_burst_fft_create");
+    d->gpu_destroy = dlsym(d->gpu_handle, "gpu_burst_fft_destroy");
+    d->gpu_process = dlsym(d->gpu_handle, "gpu_burst_fft_process");
+
+    if (!d->gpu_create || !d->gpu_destroy || !d->gpu_process) {
+        dlclose(d->gpu_handle);
+        d->gpu_handle = NULL;
+        return -1;
+    }
+
     return 0;
 }
 
@@ -302,36 +336,41 @@ burst_detector_t *burst_detector_create(burst_config_t *config) {
     /* Timestamp: set when first samples arrive */
     d->start_time_ns = 0;
 
-#ifdef USE_GPU
-    /* GPU acceleration */
+    /* GPU acceleration (loaded via dlopen plugin) */
     d->gpu = NULL;
+    d->gpu_handle = NULL;
     if (config->use_gpu) {
-        d->gpu_batch_size = 16;
-        d->gpu = gpu_burst_fft_create(d->fft_size, d->gpu_batch_size, d->window);
-        if (d->gpu) {
-            d->gpu_batch_count = 0;
-            d->gpu_batch_input = malloc(sizeof(float) * 2 * d->fft_size
-                                        * d->gpu_batch_size);
-            d->gpu_batch_output = malloc(sizeof(float) * d->fft_size
-                                         * d->gpu_batch_size);
+        if (gpu_plugin_load(d) == 0) {
+            d->gpu_batch_size = 16;
+            d->gpu = d->gpu_create(d->fft_size, d->gpu_batch_size, d->window);
+            if (d->gpu) {
+                d->gpu_batch_count = 0;
+                d->gpu_batch_input = malloc(sizeof(float) * 2 * d->fft_size
+                                            * d->gpu_batch_size);
+                d->gpu_batch_output = malloc(sizeof(float) * d->fft_size
+                                             * d->gpu_batch_size);
+            } else {
+                fprintf(stderr, "burst_detect: GPU init failed, falling back to CPU\n");
+                dlclose(d->gpu_handle);
+                d->gpu_handle = NULL;
+            }
         } else {
-            fprintf(stderr, "burst_detect: GPU init failed, falling back to CPU\n");
+            fprintf(stderr, "burst_detect: GPU plugin not found, using CPU\n");
         }
     }
-#endif
 
     return d;
 }
 
 void burst_detector_destroy(burst_detector_t *d) {
     if (!d) return;
-#ifdef USE_GPU
     if (d->gpu) {
-        gpu_burst_fft_destroy(d->gpu);
+        d->gpu_destroy(d->gpu);
         free(d->gpu_batch_input);
         free(d->gpu_batch_output);
     }
-#endif
+    if (d->gpu_handle)
+        dlclose(d->gpu_handle);
     fftwf_destroy_plan(d->fft_plan);
     fftwf_free(d->fft_in);
     fftwf_free(d->fft_out);
@@ -632,7 +671,6 @@ static void create_new_bursts(burst_detector_t *d) {
     }
 }
 
-#ifdef USE_GPU
 /* ---- Internal: run CPU state machine on pre-computed magnitude ---- */
 
 static void process_magnitude_frame(burst_detector_t *d, const float *magnitude) {
@@ -657,9 +695,9 @@ static void gpu_flush_batch(burst_detector_t *d) {
     if (d->gpu_batch_count == 0)
         return;
 
-    if (gpu_burst_fft_process(d->gpu, d->gpu_batch_input,
-                               d->gpu_batch_output,
-                               d->gpu_batch_count) != 0) {
+    if (d->gpu_process(d->gpu, d->gpu_batch_input,
+                        d->gpu_batch_output,
+                        d->gpu_batch_count) != 0) {
         fprintf(stderr, "burst_detect: GPU processing failed\n");
         d->gpu_batch_count = 0;
         return;
@@ -673,7 +711,6 @@ static void gpu_flush_batch(burst_detector_t *d) {
 
     d->gpu_batch_count = 0;
 }
-#endif
 
 /* ---- Internal: process one FFT frame ---- */
 
@@ -780,7 +817,6 @@ void burst_detector_feed(burst_detector_t *d, const int8_t *iq,
     d->sample_count += num_samples;
 
     /* Process complete FFT frames */
-#ifdef USE_GPU
     if (d->gpu) {
         /* GPU path: accumulate frames into batch, flush when full.
          * Use a local read cursor (read_idx) to track accumulation
@@ -820,9 +856,7 @@ void burst_detector_feed(burst_detector_t *d, const int8_t *iq,
         /* Flush remaining partial batch */
         if (d->gpu_batch_count > 0)
             gpu_flush_batch(d);
-    } else
-#endif
-    {
+    } else {
         /* CPU path: process one frame at a time */
         while (d->index + d->fft_size <= d->sample_count) {
             size_t rb_pos = (size_t)(d->index % d->ringbuf_size);
@@ -878,7 +912,6 @@ void burst_detector_feed_cf32(burst_detector_t *d, const float *iq,
     d->sample_count += num_samples;
 
     /* Process complete FFT frames (identical to int8 path) */
-#ifdef USE_GPU
     if (d->gpu) {
         uint64_t read_idx = d->index;
 
@@ -910,9 +943,7 @@ void burst_detector_feed_cf32(burst_detector_t *d, const float *iq,
 
         if (d->gpu_batch_count > 0)
             gpu_flush_batch(d);
-    } else
-#endif
-    {
+    } else {
         while (d->index + d->fft_size <= d->sample_count) {
             size_t rb_pos = (size_t)(d->index % d->ringbuf_size);
 

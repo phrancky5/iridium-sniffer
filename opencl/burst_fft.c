@@ -28,8 +28,6 @@
  * Adapted from ice9-bluetooth-sniffer opencl/fft.c pattern.
  */
 
-#ifdef USE_OPENCL
-
 #define CL_TARGET_OPENCL_VERSION 120
 
 #include <stdio.h>
@@ -180,8 +178,8 @@ static int compile_kernels(gpu_burst_fft_t *g) {
 
 /* ---- Create ---- */
 
-gpu_burst_fft_t *gpu_burst_fft_create(int fft_size, int batch_size,
-                                       const float *window) {
+GPU_API gpu_burst_fft_t *gpu_burst_fft_create(int fft_size, int batch_size,
+                                               const float *window) {
     cl_int err;
 
     gpu_burst_fft_t *g = calloc(1, sizeof(*g));
@@ -298,7 +296,7 @@ err_bufs:
 
 /* ---- Destroy ---- */
 
-void gpu_burst_fft_destroy(gpu_burst_fft_t *g) {
+GPU_API void gpu_burst_fft_destroy(gpu_burst_fft_t *g) {
     if (!g) return;
 
     deleteVkFFT(&g->vkfft_app);
@@ -318,8 +316,8 @@ void gpu_burst_fft_destroy(gpu_burst_fft_t *g) {
 
 /* ---- Process batch ---- */
 
-int gpu_burst_fft_process(gpu_burst_fft_t *g, const float *input,
-                           float *output, int batch_count) {
+GPU_API int gpu_burst_fft_process(gpu_burst_fft_t *g, const float *input,
+                                   float *output, int batch_count) {
     cl_int err;
 
     if (batch_count <= 0 || batch_count > g->batch_size)
@@ -374,4 +372,3 @@ int gpu_burst_fft_process(gpu_burst_fft_t *g, const float *input,
     return 0;
 }
 
-#endif /* USE_OPENCL */

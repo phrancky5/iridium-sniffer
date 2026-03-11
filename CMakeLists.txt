@@ -209,13 +209,20 @@ else()
     message(STATUS "ZMQ: not found (install libzmq3-dev for --zmq support)")
 endif()
 
-# GPU acceleration
+# GPU acceleration - build as plugin (.so) loaded at runtime via dlopen
+target_link_libraries(iridium-sniffer PRIVATE ${CMAKE_DL_LIBS})
+
 if(USE_OPENCL AND OpenCL_FOUND)
-    target_sources(iridium-sniffer PRIVATE ${PROJECT_SOURCE_DIR}/opencl/burst_fft.c)
-    include_directories("vkfft" "opencl")
-    add_definitions(-DVKFFT_BACKEND=3 -DUSE_OPENCL -DUSE_GPU)
-    target_link_libraries(iridium-sniffer PRIVATE OpenCL::OpenCL)
-    message(STATUS "GPU acceleration: OpenCL")
+    add_library(iridium-sniffer-gpu SHARED ${PROJECT_SOURCE_DIR}/opencl/burst_fft.c)
+    target_include_directories(iridium-sniffer-gpu PRIVATE
+        "${PROJECT_SOURCE_DIR}/vkfft" "${PROJECT_SOURCE_DIR}/opencl")
+    target_compile_definitions(iridium-sniffer-gpu PRIVATE VKFFT_BACKEND=3 USE_OPENCL)
+    target_link_libraries(iridium-sniffer-gpu PRIVATE OpenCL::OpenCL)
+    set_target_properties(iridium-sniffer-gpu PROPERTIES
+        C_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON)
+    install(TARGETS iridium-sniffer-gpu DESTINATION lib)
+    message(STATUS "GPU acceleration: OpenCL (plugin)")
 elseif(USE_VULKAN AND Vulkan_FOUND)
     # glslang is required for VkFFT Vulkan shader compilation
     find_library(GLSLANG_LIB glslang)
@@ -233,44 +240,63 @@ elseif(USE_VULKAN AND Vulkan_FOUND)
         message(WARNING "glslang not found, Vulkan GPU acceleration disabled.\n"
                         "Install: sudo apt install glslang-dev")
     else()
-        target_sources(iridium-sniffer PRIVATE ${PROJECT_SOURCE_DIR}/vulkan/burst_fft.c)
-        include_directories("vkfft" "opencl")  # opencl/ has burst_fft.h
+        add_library(iridium-sniffer-gpu SHARED ${PROJECT_SOURCE_DIR}/vulkan/burst_fft.c)
+        target_include_directories(iridium-sniffer-gpu PRIVATE
+            "${PROJECT_SOURCE_DIR}/vkfft" "${PROJECT_SOURCE_DIR}/opencl")
         if(GLSLANG_INCLUDE_DIR)
-            include_directories(${GLSLANG_INCLUDE_DIR})
+            target_include_directories(iridium-sniffer-gpu PRIVATE ${GLSLANG_INCLUDE_DIR})
         endif()
-        add_definitions(-DVKFFT_BACKEND=0 -DUSE_VULKAN -DUSE_GPU)
-        target_link_libraries(iridium-sniffer PRIVATE Vulkan::Vulkan
+        target_compile_definitions(iridium-sniffer-gpu PRIVATE VKFFT_BACKEND=0 USE_VULKAN)
+        target_link_libraries(iridium-sniffer-gpu PRIVATE Vulkan::Vulkan
                               ${GLSLANG_LIB} ${SPIRV_LIB})
         if(GLSLANG_RES_LIB)
-            target_link_libraries(iridium-sniffer PRIVATE ${GLSLANG_RES_LIB})
+            target_link_libraries(iridium-sniffer-gpu PRIVATE ${GLSLANG_RES_LIB})
         endif()
         if(MACHINEINDEP_LIB)
-            target_link_libraries(iridium-sniffer PRIVATE ${MACHINEINDEP_LIB})
+            target_link_libraries(iridium-sniffer-gpu PRIVATE ${MACHINEINDEP_LIB})
         endif()
         if(GENERICCODEGEN_LIB)
-            target_link_libraries(iridium-sniffer PRIVATE ${GENERICCODEGEN_LIB})
+            target_link_libraries(iridium-sniffer-gpu PRIVATE ${GENERICCODEGEN_LIB})
         endif()
         if(OSDEPENDENT_LIB)
-            target_link_libraries(iridium-sniffer PRIVATE ${OSDEPENDENT_LIB})
+            target_link_libraries(iridium-sniffer-gpu PRIVATE ${OSDEPENDENT_LIB})
         endif()
         if(SPIRV_TOOLS_OPT_LIB)
-            target_link_libraries(iridium-sniffer PRIVATE ${SPIRV_TOOLS_OPT_LIB})
+            target_link_libraries(iridium-sniffer-gpu PRIVATE ${SPIRV_TOOLS_OPT_LIB})
         endif()
         if(SPIRV_TOOLS_LIB)
-            target_link_libraries(iridium-sniffer PRIVATE ${SPIRV_TOOLS_LIB})
+            target_link_libraries(iridium-sniffer-gpu PRIVATE ${SPIRV_TOOLS_LIB})
         endif()
         # glslang is C++, need stdc++ for linking
-        target_link_libraries(iridium-sniffer PRIVATE stdc++)
-        message(STATUS "GPU acceleration: Vulkan")
+        target_link_libraries(iridium-sniffer-gpu PRIVATE stdc++)
+        set_target_properties(iridium-sniffer-gpu PROPERTIES
+            C_VISIBILITY_PRESET hidden
+            VISIBILITY_INLINES_HIDDEN ON)
+        install(TARGETS iridium-sniffer-gpu DESTINATION lib)
+        message(STATUS "GPU acceleration: Vulkan (plugin)")
     endif()
 else()
-    message(STATUS "GPU acceleration: disabled")
+    message(STATUS "GPU acceleration: disabled (no plugin built)")
 endif()
 
 set_property(TARGET iridium-sniffer PROPERTY C_STANDARD 99)
 set_property(TARGET iridium-sniffer PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 
 install(TARGETS iridium-sniffer DESTINATION bin)
+
+# CPack packaging (make package)
+set(CPACK_PACKAGE_NAME "iridium-sniffer")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Iridium burst detector and demodulator")
+set(CPACK_PACKAGE_VENDOR "CEMAXECUTER LLC")
+set(CPACK_PACKAGE_VERSION_MAJOR "1")
+set(CPACK_PACKAGE_VERSION_MINOR "0")
+set(CPACK_PACKAGE_VERSION_PATCH "0")
+set(CPACK_GENERATOR "DEB;TGZ")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "CEMAXECUTER LLC")
+set(CPACK_DEBIAN_PACKAGE_SECTION "hamradio")
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
+include(CPack)
 
 # uninstall target
 if(NOT TARGET uninstall)

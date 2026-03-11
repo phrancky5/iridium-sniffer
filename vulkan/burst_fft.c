@@ -25,8 +25,6 @@
  * Suitable for shared-memory GPUs (Pi5 VideoCore VII) and discrete GPUs.
  */
 
-#ifdef USE_VULKAN
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -117,8 +115,8 @@ static int find_compute_queue_family(VkPhysicalDevice phys) {
 
 /* ---- Create ---- */
 
-gpu_burst_fft_t *gpu_burst_fft_create(int fft_size, int batch_size,
-                                       const float *window) {
+GPU_API gpu_burst_fft_t *gpu_burst_fft_create(int fft_size, int batch_size,
+                                               const float *window) {
     VkResult vk;
 
     gpu_burst_fft_t *g = calloc(1, sizeof(*g));
@@ -421,7 +419,7 @@ err_free:
 
 /* ---- Destroy ---- */
 
-void gpu_burst_fft_destroy(gpu_burst_fft_t *g) {
+GPU_API void gpu_burst_fft_destroy(gpu_burst_fft_t *g) {
     if (!g) return;
 
     deleteVkFFT(&g->vkfft_app);
@@ -441,8 +439,8 @@ void gpu_burst_fft_destroy(gpu_burst_fft_t *g) {
 
 /* ---- Process batch ---- */
 
-int gpu_burst_fft_process(gpu_burst_fft_t *g, const float *input,
-                           float *output, int batch_count) {
+GPU_API int gpu_burst_fft_process(gpu_burst_fft_t *g, const float *input,
+                                   float *output, int batch_count) {
     if (batch_count <= 0 || batch_count > g->batch_size)
         return -1;
 
@@ -514,4 +512,3 @@ int gpu_burst_fft_process(gpu_burst_fft_t *g, const float *input,
     return 0;
 }
 
-#endif /* USE_VULKAN */
