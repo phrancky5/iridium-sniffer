@@ -2,7 +2,7 @@
 
 A standalone Iridium satellite burst detector and demodulator written in C. It provides an alternative to [gr-iridium](https://github.com/muccc/gr-iridium) by eliminating the GNU Radio dependency, while producing the same [iridium-toolkit](https://github.com/muccc/iridium-toolkit) compatible RAW output on stdout. For users who want a lighter-weight, dependency-free option or need embedded deployment, this offers similar functionality with a different architectural approach.
 
-Supports HackRF, BladeRF, USRP (UHD), and SoapySDR for live capture, or processes IQ recordings from file. Optional GPU-accelerated burst detection is available via OpenCL (NVIDIA, AMD, Intel). Runs on Raspberry Pi 5 and other ARM boards in CPU-only mode with FFTW wisdom pre-generation.
+Supports HackRF, BladeRF, USRP (UHD), SDRplay (native API), and SoapySDR for live capture, or processes IQ recordings from file. Optional GPU-accelerated burst detection is available via OpenCL (NVIDIA, AMD, Intel) as a runtime plugin -- the main binary works on systems without GPU support. Runs on Raspberry Pi 5 and other ARM boards in CPU-only mode with FFTW wisdom pre-generation.
 
 A built-in web map (`--web`, beta) provides a real-time Leaflet.js visualization of decoded ring alert positions and active satellites -- no external tools or Python required.
 
@@ -56,6 +56,7 @@ sudo apt install libhackrf-dev      # HackRF One
 sudo apt install libbladerf-dev     # BladeRF
 sudo apt install libuhd-dev         # USRP (B2x0, N2x0, X3x0, etc.)
 sudo apt install libsoapysdr-dev    # RTL-SDR, Airspy, LimeSDR, etc. via SoapySDR
+# SDRplay native API: install from https://www.sdrplay.com/api/
 
 # Optional: ACARS ARINC-622/ADS-C/CPDLC decoding
 sudo apt install libacars-dev        # libacars-2
@@ -628,6 +629,9 @@ Then specify the interface with `-i`. SoapySDR devices can be selected by index 
 # USRP (use serial from --list)
 ./iridium-sniffer -i usrp-PRODUCT-SERIAL
 
+# SDRplay (native API, use serial from --list)
+./iridium-sniffer -i sdrplay-SERIAL
+
 # BladeRF
 ./iridium-sniffer -i bladerf1
 
@@ -635,6 +639,7 @@ Then specify the interface with `-i`. SoapySDR devices can be selected by index 
 ./iridium-sniffer -i soapy-0 -B --soapy-gain=40
 ./iridium-sniffer -i hackrf-SERIAL --hackrf-lna=40 --hackrf-vga=20
 ./iridium-sniffer -i usrp-PRODUCT-SERIAL --usrp-gain=50
+./iridium-sniffer -i sdrplay-SERIAL --sdrplay-gain=50 -B
 
 # SoapySDR device-specific settings
 ./iridium-sniffer -i soapy:driver=airspy,serial=ABC --soapy-setting=bitpack:true
@@ -723,6 +728,7 @@ SDR options:
     -i, --interface=IFACE   SDR to use (see --list for available devices):
                              soapy-N (by index) or soapy:key=val,... (by args)
                              hackrf-SERIAL, bladerfN, usrp-PRODUCT-SERIAL
+                             sdrplay-SERIAL (native SDRplay API)
     -c, --center-freq=HZ    center frequency in Hz (default: 1622000000)
     -r, --sample-rate=HZ    sample rate in Hz (default: 10000000)
     -B, --bias-tee          enable bias tee power
@@ -738,6 +744,7 @@ Gain options:
     --soapy-gain=GAIN       SoapySDR gain in dB (default: 40)
     --soapy-setting=K:V    SoapySDR device setting (repeatable)
                              e.g. bitpack:true (Airspy), biastee_rx:true (bladeRF)
+    --sdrplay-gain=GAIN     SDRplay gain in dB, 0-59 (default: 40)
 
 Detection:
     -d, --threshold=DB      burst detection threshold in dB (default: 16.0)
@@ -800,6 +807,7 @@ Any SDR that tunes to L-band (1616-1626.5 MHz) and samples at 2 MHz or above wil
 | Ettus USRP B210 | 12-bit | 56 MHz | Best sensitivity, dual channel |
 | HackRF One | 8-bit | 20 MHz | Widely available, good performance |
 | BladeRF | 12-bit | 40 MHz | Good sensitivity |
+| SDRplay RSPdx/RSP1A/RSP1B | 14-bit | 10 MHz | Native API, bias tee on Antenna B (RSPdx/RSP2) |
 | RTL-SDR (via SoapySDR) | 8-bit | 2.4 MHz | Limited bandwidth, but works |
 | Airspy, LimeSDR, etc. | varies | varies | Via SoapySDR |
 

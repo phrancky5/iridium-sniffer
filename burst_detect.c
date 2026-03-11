@@ -177,9 +177,24 @@ static int peak_cmp_desc(const void *a, const void *b) {
 
 static int gpu_plugin_load(burst_detector_t *d)
 {
+    /* Try next to the executable first, then standard paths */
+    char exe_path[4096] = {0};
+    char exe_dir_lib[4096] = {0};
+    ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    if (len > 0) {
+        exe_path[len] = '\0';
+        char *slash = strrchr(exe_path, '/');
+        if (slash) {
+            *slash = '\0';
+            snprintf(exe_dir_lib, sizeof(exe_dir_lib),
+                     "%s/libiridium-sniffer-gpu.so", exe_path);
+        }
+    }
+
     const char *names[] = {
-        "libiridium-sniffer-gpu.so",   /* standard library path */
-        "./libiridium-sniffer-gpu.so", /* current directory */
+        exe_dir_lib[0] ? exe_dir_lib : NULL, /* next to executable */
+        "libiridium-sniffer-gpu.so",          /* standard library path */
+        "./libiridium-sniffer-gpu.so",        /* current directory */
         NULL
     };
 
