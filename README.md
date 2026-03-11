@@ -713,6 +713,23 @@ ZMQ PUB sockets are non-blocking: if no subscribers are connected, messages are 
 
 Requires libzmq (`sudo apt install libzmq3-dev`). The feature is compiled in only when libzmq is detected at build time.
 
+### ZMQ SUB Input
+
+Receive IQ samples from a remote SDR over a ZMQ PUB socket. This enables running the SDR on one machine and iridium-sniffer on another, or sharing a single SDR stream across multiple decoders.
+
+```bash
+# Receive cf32 IQ samples from GNU Radio ZMQ PUB sink
+./iridium-sniffer --zmq-sub=tcp://192.168.1.10:5555 --format=cf32 -r 10000000
+
+# Default endpoint (localhost:5555)
+./iridium-sniffer --zmq-sub --format=cf32 -r 10000000
+
+# With web map and custom center frequency
+./iridium-sniffer --zmq-sub=tcp://remote-sdr:5555 --format=cf32 -r 10000000 -c 1622000000 --web
+```
+
+The sample format (`--format`) and sample rate (`-r`) must match what the publisher is sending. GNU Radio's `zeromq.pub_sink` typically outputs cf32 (complex float32).
+
 ## Command Reference
 
 ```
@@ -768,6 +785,7 @@ ACARS:
 
 ZMQ:
     --zmq[=ENDPOINT]        publish output via ZMQ PUB (default: tcp://*:7006)
+    --zmq-sub[=ENDPOINT]    receive IQ samples via ZMQ SUB (default: tcp://127.0.0.1:5555)
 
 Output:
     --file-info=STR         file info string for RAW output (default: auto)
