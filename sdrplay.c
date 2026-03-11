@@ -319,6 +319,7 @@ void *sdrplay_setup(const char *serial)
             break;
         case SDRPLAY_RSP2_ID:
             chp->rsp2TunerParams.biasTEnable = 1;
+            warnx("sdrplay: RSP2 bias tee only on Antenna B port");
             break;
         case SDRPLAY_RSPduo_ID:
             chp->rspDuoTunerParams.biasTEnable = 1;
@@ -326,6 +327,7 @@ void *sdrplay_setup(const char *serial)
         case SDRPLAY_RSPdx_ID:
         case SDRPLAY_RSPdxR2_ID:
             devp->rspDxParams.biasTEnable = 1;
+            warnx("sdrplay: RSPdx bias tee only on Antenna B port");
             break;
         default:
             warnx("sdrplay: bias tee not supported on this model");
