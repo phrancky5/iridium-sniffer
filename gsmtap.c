@@ -9,14 +9,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-/*
- * GSMTAP output -- send reassembled IDA frames to Wireshark via UDP
- *
- * GSMTAP is a de-facto standard for feeding GSM protocol data to
- * Wireshark. We wrap Iridium LAPDm frames in a 16-byte GSMTAP header
- * and send them as UDP to port 4729 (Wireshark's default GSMTAP port).
- */
-
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <string.h>
@@ -24,6 +16,7 @@
 #include <unistd.h>
 
 #include "gsmtap.h"
+#include "net_util.h"
 
 /* Packed GSMTAP header (16 bytes) */
 typedef struct __attribute__((packed)) {
@@ -53,8 +46,12 @@ int gsmtap_init(const char *host, int port)
     memset(&gsmtap_addr, 0, sizeof(gsmtap_addr));
     gsmtap_addr.sin_family = AF_INET;
     gsmtap_addr.sin_port = htons(port);
-    inet_pton(AF_INET, host ? host : GSMTAP_DEFAULT_HOST,
-              &gsmtap_addr.sin_addr);
+    const char *h = host ? host : GSMTAP_DEFAULT_HOST;
+    if (resolve_host_ipv4(h, &gsmtap_addr.sin_addr) < 0) {
+        close(gsmtap_fd);
+        gsmtap_fd = -1;
+        return -1;
+    }
     return 0;
 }
 

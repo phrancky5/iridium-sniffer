@@ -206,13 +206,15 @@ static void list_interfaces(void) {
 #ifdef HAVE_UHD
     usrp_list();
 #endif
-#ifdef HAVE_SOAPYSDR
-    soapy_list();
-#endif
 #ifdef HAVE_SDRPLAY
     sdrplay_list();
 #endif
-    exit(0);
+#ifdef HAVE_SOAPYSDR
+    soapy_list();
+#endif
+    /* Use _exit to skip atexit/destructor handlers -- SoapySDR's SDRplay
+     * module conflicts with the native API during library teardown. */
+    _exit(0);
 }
 
 void parse_options(int argc, char **argv) {

@@ -16,6 +16,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "net_util.h"
 #include "sdr.h"
 #include "vita49.h"
 
@@ -136,8 +137,8 @@ void *vita49_thread(void *arg)
         .sin_family = AF_INET,
         .sin_port = htons(port),
     };
-    if (inet_pton(AF_INET, bind_addr, &addr.sin_addr) != 1) {
-        warnx("vita49: invalid bind address '%s'", bind_addr);
+    if (resolve_host_ipv4(bind_addr, &addr.sin_addr) < 0) {
+        warnx("vita49: cannot resolve bind address '%s'", bind_addr);
         close(fd);
         running = 0;
         kill(self_pid, SIGINT);
