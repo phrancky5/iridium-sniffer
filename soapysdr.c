@@ -52,24 +52,25 @@ void soapy_list(void) {
                 dev_serial = results[i].vals[j];
         }
 
-        printf("interface {value=soapy-%zu}{display=Iridium Sniffer (%s%s%s)}\n",
-               i,
-               driver ? driver : "SoapySDR",
-               label ? " - " : "",
-               label ? label : "");
+        {
+            char val[32];
+            snprintf(val, sizeof(val), "soapy-%zu", i);
+            printf("  %-24s %s%s%s\n", val,
+                   driver ? driver : "SoapySDR",
+                   label ? " - " : "",
+                   label ? label : "");
+        }
 
         /* Show device args for soapy: selection */
         if (driver || dev_serial) {
-            printf("         soapy:");
-            int first = 1;
-            if (driver) {
-                printf("driver=%s", driver);
-                first = 0;
-            }
-            if (dev_serial) {
-                printf("%sserial=%s", first ? "" : ",", dev_serial);
-            }
-            printf("\n");
+            char args[256] = "soapy:";
+            size_t off = 6;
+            if (driver)
+                off += snprintf(args + off, sizeof(args) - off, "driver=%s", driver);
+            if (dev_serial)
+                off += snprintf(args + off, sizeof(args) - off, "%sserial=%s",
+                                driver ? "," : "", dev_serial);
+            printf("  %-24s  (alternate)\n", args);
         }
     }
 

@@ -185,9 +185,11 @@ void sdrplay_list(void)
         case SDRPLAY_RSPdxR2_ID: model = "RSPdxR2";  break;
         default:                 model = "Unknown";  break;
         }
-        printf("interface {value=sdrplay-%s}"
-               "{display=Iridium Sniffer (SDRplay %s)}\n",
-               devices[i].SerNo, model);
+        {
+            char val[64];
+            snprintf(val, sizeof(val), "sdrplay-%s", devices[i].SerNo);
+            printf("  %-24s SDRplay %s\n", val, model);
+        }
     }
 
     sdrplay_api_UnlockDeviceApi();

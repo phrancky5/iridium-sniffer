@@ -30,7 +30,11 @@ void hackrf_list(void) {
     for (i = 0; i < hackrf_devices->devicecount; ++i) {
         for (s = hackrf_devices->serial_numbers[i]; *s == '0'; ++s)
             ;
-        printf("interface {value=hackrf-%s}{display=Iridium Sniffer (HackRF)}\n", s);
+        {
+            char val[64];
+            snprintf(val, sizeof(val), "hackrf-%s", s);
+            printf("  %-24s HackRF One\n", val);
+        }
     }
     hackrf_device_list_free(hackrf_devices);
 }

@@ -107,8 +107,11 @@ void usrp_list(void) {
             continue;
         }
 
-        printf("interface {value=usrp-%s-%s}{display=Iridium Sniffer (USRP %s)}\n",
-                product, serial, product);
+        {
+            char val[128];
+            snprintf(val, sizeof(val), "usrp-%s-%s", product, serial);
+            printf("  %-24s USRP %s\n", val, product);
+        }
 
         free(usrp_info);
     }

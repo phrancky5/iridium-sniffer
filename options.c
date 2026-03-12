@@ -197,6 +197,7 @@ static void usage(int exitcode) {
 }
 
 static void list_interfaces(void) {
+    printf("Available SDR interfaces (-i VALUE):\n");
 #ifdef HAVE_HACKRF
     hackrf_list();
 #endif
@@ -212,6 +213,7 @@ static void list_interfaces(void) {
 #ifdef HAVE_SOAPYSDR
     soapy_list();
 #endif
+    fflush(stdout);
     /* Use _exit to skip atexit/destructor handlers -- SoapySDR's SDRplay
      * module conflicts with the native API during library teardown. */
     _exit(0);

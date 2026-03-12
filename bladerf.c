@@ -42,7 +42,11 @@ void bladerf_list(void) {
         errx(1, "Unable to get bladeRF device list: %s", bladerf_strerror(num));
 
     for (i = 0; i < num; ++i)
-        printf("interface {value=bladerf%i}{display=Iridium Sniffer (BladeRF)}\n", devices[i].instance);
+        {
+            char val[64];
+            snprintf(val, sizeof(val), "bladerf%d", devices[i].instance);
+            printf("  %-24s BladeRF %s\n", val, devices[i].product);
+        }
 
 out:
     if (num != 0)
