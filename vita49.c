@@ -45,7 +45,15 @@ static int vrt_parse_header(const uint8_t *pkt, size_t pkt_len,
     if (pkt_len < 4)
         return -1;
 
+    /* Strip VRL wrapper if present (VITA 49.1):
+     * 8-byte VRL header (magic "VRLP" + frame size) + VRT packet + 4-byte VRL trailer */
+    size_t vrl_off = 0;
     uint32_t w0 = ntohl(*(const uint32_t *)pkt);
+    if (w0 == 0x56524C50 && pkt_len > 12) {  /* "VRLP" */
+        vrl_off = 8;
+        pkt_len -= 12;  /* 8 header + 4 trailer */
+        w0 = ntohl(*(const uint32_t *)(pkt + vrl_off));
+    }
 
     unsigned pkt_type    = (w0 >> 28) & 0xF;
     unsigned class_id    = (w0 >> 27) & 0x1;
@@ -59,9 +67,10 @@ static int vrt_parse_header(const uint8_t *pkt, size_t pkt_len,
         pkt_type != VRT_TYPE_SIGNAL_DATA)
         return -1;
 
-    /* Validate packet size against received datagram */
+    /* Validate packet size against received datagram (excluding VRL wrapper) */
+    size_t vrt_len = pkt_len - vrl_off;
     size_t pkt_size_bytes = (size_t)pkt_size_w * 4;
-    if (pkt_size_bytes > pkt_len || pkt_size_bytes < 4)
+    if (pkt_size_bytes > vrt_len || pkt_size_bytes < 4)
         return -1;
 
     /* Calculate header word count */
@@ -82,7 +91,7 @@ static int vrt_parse_header(const uint8_t *pkt, size_t pkt_len,
         return -1;  /* no payload */
 
     unsigned payload_words = pkt_size_w - hdr_words - trailer_words;
-    *payload_off = hdr_words * 4;
+    *payload_off = vrl_off + hdr_words * 4;
     *payload_bytes = payload_words * 4;
     return 0;
 }
@@ -187,9 +196,14 @@ void *vita49_thread(void *arg)
             continue;
         }
 
-        /* Sequence gap detection (4-bit counter in header word 0) */
-        uint32_t w0 = ntohl(*(const uint32_t *)pkt_buf);
-        unsigned count = (w0 >> 16) & 0xF;
+        /* Sequence gap detection (4-bit counter in VRT header word 0).
+         * payload_off includes any VRL offset, so VRT word 0 is at
+         * payload_off minus the VRT header words that precede the payload. */
+        size_t vrt_off = 0;
+        if (ntohl(*(const uint32_t *)pkt_buf) == 0x56524C50)
+            vrt_off = 8;
+        uint32_t w0_seq = ntohl(*(const uint32_t *)(pkt_buf + vrt_off));
+        unsigned count = (w0_seq >> 16) & 0xF;
         if (have_count) {
             unsigned expected = (last_count + 1) & 0xF;
             if (count != expected)
@@ -204,14 +218,18 @@ void *vita49_thread(void *arg)
         size_t num_samples;
 
         switch (iq_format) {
-        case FMT_CF32:
-            /* 8 bytes per complex sample (2 x float32) */
+        case FMT_CF32: {
+            /* 8 bytes per complex sample (2 x float32), big-endian in VRT */
             num_samples = payload_bytes / 8;
             if (num_samples == 0) continue;
             s = malloc(sizeof(*s) + num_samples * 8);
             s->format = SAMPLE_FMT_FLOAT;
-            memcpy(s->samples, payload, num_samples * 8);
+            const uint32_t *src32 = (const uint32_t *)payload;
+            uint32_t *dst32 = (uint32_t *)s->samples;
+            for (size_t i = 0; i < num_samples * 2; i++)
+                dst32[i] = ntohl(src32[i]);
             break;
+        }
 
         case FMT_CI16: {
             /* 4 bytes per complex sample (2 x int16), big-endian in VRT */
