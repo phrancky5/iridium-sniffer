@@ -127,11 +127,13 @@ static void event_callback(sdrplay_api_EventT eventId,
         kill(self_pid, SIGINT);
         break;
 
+#ifdef sdrplay_api_DeviceFailure
     case sdrplay_api_DeviceFailure:
         warnx("sdrplay: device failure");
         running = 0;
         kill(self_pid, SIGINT);
         break;
+#endif
 
     default:
         break;
@@ -178,11 +180,15 @@ void sdrplay_list(void)
         switch (devices[i].hwVer) {
         case SDRPLAY_RSP1_ID:    model = "RSP1";    break;
         case SDRPLAY_RSP1A_ID:   model = "RSP1A";   break;
+#ifdef SDRPLAY_RSP1B_ID
         case SDRPLAY_RSP1B_ID:   model = "RSP1B";   break;
+#endif
         case SDRPLAY_RSP2_ID:    model = "RSP2";     break;
         case SDRPLAY_RSPduo_ID:  model = "RSPduo";   break;
         case SDRPLAY_RSPdx_ID:   model = "RSPdx";    break;
+#ifdef SDRPLAY_RSPdxR2_ID
         case SDRPLAY_RSPdxR2_ID: model = "RSPdxR2";  break;
+#endif
         default:                 model = "Unknown";  break;
         }
         {
@@ -218,6 +224,11 @@ void *sdrplay_setup(const char *serial)
         errx(1, "sdrplay: cannot get API version: %s",
              sdrplay_api_GetErrorString(err));
     fprintf(stderr, "sdrplay: API version %.2f\n", ver);
+    if (ver < 3.07f)
+        warnx("sdrplay: API version %.2f is too old (minimum 3.07)", ver);
+    else if (ver < 3.14f)
+        warnx("sdrplay: API version %.2f -- consider upgrading to 3.14+ "
+              "for RSP1B/RSPdxR2 support", ver);
 
     /* Enumerate devices */
     sdrplay_api_DeviceT devices[SDRPLAY_MAX_DEVICES];
@@ -311,7 +322,9 @@ void *sdrplay_setup(const char *serial)
     if (bias_tee) {
         switch (ctx->device.hwVer) {
         case SDRPLAY_RSP1A_ID:
+#ifdef SDRPLAY_RSP1B_ID
         case SDRPLAY_RSP1B_ID:
+#endif
             chp->rsp1aTunerParams.biasTEnable = 1;
             break;
         case SDRPLAY_RSP2_ID:
@@ -322,7 +335,9 @@ void *sdrplay_setup(const char *serial)
             chp->rspDuoTunerParams.biasTEnable = 1;
             break;
         case SDRPLAY_RSPdx_ID:
+#ifdef SDRPLAY_RSPdxR2_ID
         case SDRPLAY_RSPdxR2_ID:
+#endif
             devp->rspDxParams.antennaSel = sdrplay_api_RspDx_ANTENNA_B;
             devp->rspDxParams.biasTEnable = 1;
             break;
@@ -359,11 +374,15 @@ void *sdrplay_setup(const char *serial)
     switch (ctx->device.hwVer) {
     case SDRPLAY_RSP1_ID:    model = "RSP1";    break;
     case SDRPLAY_RSP1A_ID:   model = "RSP1A";   break;
+#ifdef SDRPLAY_RSP1B_ID
     case SDRPLAY_RSP1B_ID:   model = "RSP1B";   break;
+#endif
     case SDRPLAY_RSP2_ID:    model = "RSP2";     break;
     case SDRPLAY_RSPduo_ID:  model = "RSPduo";   break;
     case SDRPLAY_RSPdx_ID:   model = "RSPdx";    break;
+#ifdef SDRPLAY_RSPdxR2_ID
     case SDRPLAY_RSPdxR2_ID: model = "RSPdxR2";  break;
+#endif
     default:                 model = "Unknown";  break;
     }
     fprintf(stderr, "sdrplay: %s serial=%s sr=%.0f freq=%.0f bw=%d %s\n",
