@@ -95,9 +95,10 @@ void *vita49_thread(void *arg)
     const char *bind_addr = "0.0.0.0";
     int port = VITA49_DEFAULT_PORT;
 
+    char *ep = NULL;
     if (vita49_endpoint) {
         /* Format: IP:PORT or just PORT */
-        char *ep = strdup(vita49_endpoint);
+        ep = strdup(vita49_endpoint);
         char *colon = strrchr(ep, ':');
         if (colon) {
             *colon = '\0';
@@ -108,6 +109,7 @@ void *vita49_thread(void *arg)
         }
         if (port <= 0 || port > 65535) {
             warnx("vita49: invalid port in '%s'", vita49_endpoint);
+            free(ep);
             running = 0;
             kill(self_pid, SIGINT);
             return NULL;
@@ -117,6 +119,7 @@ void *vita49_thread(void *arg)
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0) {
         warn("vita49: socket");
+        free(ep);
         running = 0;
         kill(self_pid, SIGINT);
         return NULL;
@@ -140,6 +143,7 @@ void *vita49_thread(void *arg)
     if (resolve_host_ipv4(bind_addr, &addr.sin_addr) < 0) {
         warnx("vita49: cannot resolve bind address '%s'", bind_addr);
         close(fd);
+        free(ep);
         running = 0;
         kill(self_pid, SIGINT);
         return NULL;
@@ -148,6 +152,7 @@ void *vita49_thread(void *arg)
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         warn("vita49: bind %s:%d", bind_addr, port);
         close(fd);
+        free(ep);
         running = 0;
         kill(self_pid, SIGINT);
         return NULL;
@@ -157,6 +162,7 @@ void *vita49_thread(void *arg)
             bind_addr, port,
             iq_format == FMT_CF32 ? "cf32" :
             iq_format == FMT_CI16 ? "cs16" : "cs8");
+    free(ep);       /* no longer needed after bind + log */
 
     uint8_t pkt_buf[VRT_MAX_PKT];
     unsigned last_count = 0;

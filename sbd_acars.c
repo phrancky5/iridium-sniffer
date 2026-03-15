@@ -18,6 +18,7 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -335,15 +336,19 @@ static int stat_acars_errors = 0;   /* ACARS with CRC/parity errors */
 
 static struct timespec wall_t0;
 static uint64_t first_ts_ns = 0;
-static int ts_initialized = 0;
+static pthread_once_t ts_once = PTHREAD_ONCE_INIT;
+
+/* Called exactly once via pthread_once -- captures wall clock baseline.
+ * first_ts_ns must be set before calling pthread_once. */
+static void ts_do_init(void)
+{
+    clock_gettime(CLOCK_REALTIME, &wall_t0);
+}
 
 static void ts_ensure_init(uint64_t ts_ns)
 {
-    if (!ts_initialized) {
-        clock_gettime(CLOCK_REALTIME, &wall_t0);
-        first_ts_ns = ts_ns;
-        ts_initialized = 1;
-    }
+    first_ts_ns = ts_ns;   /* harmless if already set (same value) */
+    pthread_once(&ts_once, ts_do_init);
 }
 
 static void format_timestamp(uint64_t ts_ns, char *buf, int bufsz)
