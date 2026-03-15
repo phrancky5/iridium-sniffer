@@ -243,9 +243,16 @@ static void hub_emit_acars(const char *mode, const char *reg, char ack,
 {
     if (hub_fd < 0 && airframes_fd < 0 && !airframes_saved_host) return;
 
-    /* Timestamp as ISO-8601 */
+    /* Timestamp as ISO-8601 -- use wall clock for feed output so
+     * aggregators (acars_router) don't reject messages as stale
+     * when processing backlog causes sample-derived time to lag. */
     char ts_buf[32];
-    format_timestamp(timestamp, ts_buf, sizeof(ts_buf));
+    {
+        time_t now = time(NULL);
+        struct tm tm;
+        gmtime_r(&now, &tm);
+        strftime(ts_buf, sizeof(ts_buf), "%Y-%m-%dT%H:%M:%SZ", &tm);
+    }
 
     /* Escape strings */
     char esc_reg[64], esc_label[16], esc_text[2048];
