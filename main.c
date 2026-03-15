@@ -130,7 +130,7 @@ int hackrf_amp_enable = 0;
 int bladerf_gain_val = 40;
 int usrp_gain_val = 40;
 double soapy_gain_val = 30.0;
-int sdrplay_gain_val = 40;
+int sdrplay_gain_val = -1;  /* -1 = AGC (default), 0-59 = manual */
 int bias_tee = 0;
 int web_enabled = 0;
 int web_port = 8888;
@@ -230,10 +230,12 @@ pid_t self_pid;
 #define SAMPLES_QUEUE_SIZE 4096
 #define BURST_QUEUE_SIZE   2048
 #define FRAME_QUEUE_SIZE   512
+#define OUTPUT_QUEUE_SIZE  1024
 #define NUM_DOWNMIX_WORKERS 4
 Blocking_Queue samples_queue;
 Blocking_Queue burst_queue;
 Blocking_Queue frame_queue;
+Blocking_Queue output_queue;
 
 /* Atomic stats counters (for gr-iridium compatible status line) */
 atomic_ulong stat_n_detected = 0;
@@ -241,6 +243,8 @@ atomic_ulong stat_n_handled = 0;
 atomic_ulong stat_n_ok_bursts = 0;
 atomic_ulong stat_n_ok_sub = 0;
 atomic_ulong stat_n_dropped = 0;
+atomic_ulong stat_n_frame_drops = 0;
+atomic_ulong stat_n_output_drops = 0;
 atomic_ulong stat_sample_count = 0;
 
 /* Global detector pointer for diagnostic stats (set by detector thread) */
@@ -478,7 +482,17 @@ static void gsmtap_ida_cb(const uint8_t *data, int len,
     atomic_fetch_add(&gsmtap_sent_count, 1);
 }
 
-/* ---- Frame consumer: QPSK demod + output ---- */
+/* ---- Output item: passed from consumer to output thread ---- */
+
+typedef struct {
+    /* Demodulated frame fields needed for frame_decode */
+    demod_frame_t demod;        /* shallow copy -- bits/llr ownership transferred */
+    /* IDA decode result */
+    int ida_ok;
+    ida_burst_t burst;
+} output_item_t;
+
+/* ---- Frame consumer: QPSK demod + IDA decode + stdout (fast path) ---- */
 
 static void *frame_consumer_thread(void *arg) {
     (void)arg;
@@ -506,61 +520,28 @@ static void *frame_consumer_thread(void *arg) {
             else
                 frame_output_print(demod);
 
-            if (web_enabled || position_enabled) {
-                decoded_frame_t decoded;
-                if (frame_decode(demod, &decoded)) {
-                    if (decoded.type == FRAME_IRA) {
-                        if (web_enabled) {
-                            web_map_add_ra(&decoded.ira, decoded.timestamp,
-                                            decoded.frequency);
-                            /* Cache ground beam positions for ACARS aircraft correlation */
-                            if (decoded.ira.alt >= 0 && decoded.ira.alt < 100) {
-                                pthread_mutex_lock(&beam_cache_lock);
-                                beam_cache[beam_cache_head % BEAM_CACHE_SIZE] =
-                                    (beam_cache_t){
-                                        .lat = decoded.ira.lat,
-                                        .lon = decoded.ira.lon,
-                                        .sat_id = decoded.ira.sat_id,
-                                        .beam_id = decoded.ira.beam_id,
-                                        .timestamp_ns = decoded.timestamp
-                                    };
-                                beam_cache_head++;
-                                pthread_mutex_unlock(&beam_cache_lock);
-                            }
-                        }
-                        if (position_enabled)
-                            doppler_pos_add_measurement(&decoded.ira,
-                                                         decoded.frequency,
-                                                         decoded.timestamp);
-                    } else if (decoded.type == FRAME_IBC) {
-                        if (web_enabled)
-                            web_map_add_sat(&decoded.ibc, decoded.timestamp);
+            /* Hand off to output thread for slow work (web map, ACARS, GSMTAP) */
+            if (web_enabled || position_enabled || gsmtap_enabled || acars_enabled) {
+                output_item_t *item = malloc(sizeof(output_item_t));
+                if (item) {
+                    item->demod = *demod;   /* shallow copy */
+                    item->ida_ok = ida_ok;
+                    item->burst = burst;
+                    /* Transfer bits/llr ownership to output thread */
+                    if (blocking_queue_add(&output_queue, item) == BQ_FULL) {
+                        free(demod->bits);
+                        free(demod->llr);
+                        free(item);
+                        atomic_fetch_add(&stat_n_output_drops, 1);
                     }
+                } else {
+                    free(demod->bits);
+                    free(demod->llr);
                 }
+            } else {
+                free(demod->bits);
+                free(demod->llr);
             }
-
-            if (gsmtap_enabled) {
-                if (ida_ok)
-                    ida_reassemble(&ida_ctx, &burst, gsmtap_ida_cb, NULL);
-                ida_reassemble_flush(&ida_ctx, demod->timestamp);
-            }
-
-            if (acars_enabled) {
-                if (ida_ok)
-                    ida_reassemble(&acars_ida_ctx, &burst,
-                                   acars_ida_cb, NULL);
-                ida_reassemble_flush(&acars_ida_ctx, demod->timestamp);
-            }
-
-            if (web_enabled) {
-                if (ida_ok)
-                    ida_reassemble(&mtpos_ida_ctx, &burst,
-                                   mtpos_ida_cb, NULL);
-                ida_reassemble_flush(&mtpos_ida_ctx, demod->timestamp);
-            }
-
-            free(demod->bits);
-            free(demod->llr);
             free(demod);
         } else if (verbose) {
             fprintf(stderr, "demod: UW check failed id=%lu freq=%.0f Hz dir=%s\n",
@@ -571,6 +552,76 @@ static void *frame_consumer_thread(void *arg) {
 
         free(frame->samples);
         free(frame);
+    }
+    return NULL;
+}
+
+/* ---- Output thread: frame decode, web map, ACARS, GSMTAP (slow path) ---- */
+
+static void *output_thread_fn(void *arg) {
+    (void)arg;
+    while (1) {
+        output_item_t *item;
+        if (blocking_queue_take(&output_queue, &item) != 0)
+            break;
+
+        demod_frame_t *demod = &item->demod;
+
+        if (web_enabled || position_enabled) {
+            decoded_frame_t decoded;
+            if (frame_decode(demod, &decoded)) {
+                if (decoded.type == FRAME_IRA) {
+                    if (web_enabled) {
+                        web_map_add_ra(&decoded.ira, decoded.timestamp,
+                                        decoded.frequency);
+                        if (decoded.ira.alt >= 0 && decoded.ira.alt < 100) {
+                            pthread_mutex_lock(&beam_cache_lock);
+                            beam_cache[beam_cache_head % BEAM_CACHE_SIZE] =
+                                (beam_cache_t){
+                                    .lat = decoded.ira.lat,
+                                    .lon = decoded.ira.lon,
+                                    .sat_id = decoded.ira.sat_id,
+                                    .beam_id = decoded.ira.beam_id,
+                                    .timestamp_ns = decoded.timestamp
+                                };
+                            beam_cache_head++;
+                            pthread_mutex_unlock(&beam_cache_lock);
+                        }
+                    }
+                    if (position_enabled)
+                        doppler_pos_add_measurement(&decoded.ira,
+                                                     decoded.frequency,
+                                                     decoded.timestamp);
+                } else if (decoded.type == FRAME_IBC) {
+                    if (web_enabled)
+                        web_map_add_sat(&decoded.ibc, decoded.timestamp);
+                }
+            }
+        }
+
+        if (gsmtap_enabled) {
+            if (item->ida_ok)
+                ida_reassemble(&ida_ctx, &item->burst, gsmtap_ida_cb, NULL);
+            ida_reassemble_flush(&ida_ctx, demod->timestamp);
+        }
+
+        if (acars_enabled) {
+            if (item->ida_ok)
+                ida_reassemble(&acars_ida_ctx, &item->burst,
+                               acars_ida_cb, NULL);
+            ida_reassemble_flush(&acars_ida_ctx, demod->timestamp);
+        }
+
+        if (web_enabled) {
+            if (item->ida_ok)
+                ida_reassemble(&mtpos_ida_ctx, &item->burst,
+                               mtpos_ida_cb, NULL);
+            ida_reassemble_flush(&mtpos_ida_ctx, demod->timestamp);
+        }
+
+        free(demod->bits);
+        free(demod->llr);
+        free(item);
     }
     return NULL;
 }
@@ -688,6 +739,12 @@ static void *stats_thread_fn(void *arg) {
             fprintf(stderr, " | ok: %10lu", sub);
             fprintf(stderr, " | ok_avg: %3.0f/s", ok_rate_avg);
             fprintf(stderr, " | d: %lu", dropped);
+            {
+                unsigned long fd = atomic_load(&stat_n_frame_drops);
+                unsigned long od = atomic_load(&stat_n_output_drops);
+                if (fd > 0 || od > 0)
+                    fprintf(stderr, " | fd: %lu/%lu", fd, od);
+            }
             fprintf(stderr, "\n");
         }
 
@@ -831,6 +888,7 @@ int main(int argc, char **argv) {
     blocking_queue_init(&samples_queue, SAMPLES_QUEUE_SIZE);
     blocking_queue_init(&burst_queue, BURST_QUEUE_SIZE);
     blocking_queue_init(&frame_queue, FRAME_QUEUE_SIZE);
+    blocking_queue_init(&output_queue, OUTPUT_QUEUE_SIZE);
 
     /* Create burst detector and all downmix workers here in the main thread,
      * before the SDR starts. FFTW_MEASURE plan creation can take several
@@ -875,11 +933,18 @@ int main(int argc, char **argv) {
 #endif
     }
 
-    /* Launch frame consumer (QPSK demod + output) */
+    /* Launch frame consumer (QPSK demod + stdout) */
     pthread_t frame_consumer;
     pthread_create(&frame_consumer, NULL, frame_consumer_thread, NULL);
 #ifdef __linux__
     pthread_setname_np(frame_consumer, "demod");
+#endif
+
+    /* Launch output thread (web map, ACARS, GSMTAP -- decoupled from demod) */
+    pthread_t output_worker;
+    pthread_create(&output_worker, NULL, output_thread_fn, NULL);
+#ifdef __linux__
+    pthread_setname_np(output_worker, "output");
 #endif
 
     /* Launch stats thread */
@@ -1019,6 +1084,12 @@ int main(int argc, char **argv) {
         usleep(10000);
     blocking_queue_close(&frame_queue);
     pthread_join(frame_consumer, NULL);
+
+    /* Wait for output_queue to drain before closing */
+    while (output_queue.queue_size > 0)
+        usleep(10000);
+    blocking_queue_close(&output_queue);
+    pthread_join(output_worker, NULL);
     pthread_join(stats, NULL);
 
     if (web_enabled)

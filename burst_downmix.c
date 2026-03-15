@@ -49,6 +49,7 @@
 extern Blocking_Queue burst_queue;
 extern Blocking_Queue frame_queue;
 extern volatile sig_atomic_t running;
+extern atomic_ulong stat_n_frame_drops;
 extern int verbose;
 /* ---- Constants ---- */
 
@@ -814,6 +815,7 @@ void *burst_downmix_thread(void *arg) {
             if (blocking_queue_add(&frame_queue, frames) == BQ_FULL) {
                 free(frames->samples);
                 free(frames);
+                atomic_fetch_add(&stat_n_frame_drops, 1);
             }
         } else {
             free(frames);
