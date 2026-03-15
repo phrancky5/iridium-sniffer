@@ -272,7 +272,68 @@ void *sdrplay_setup(const char *serial)
         errx(1, "sdrplay: cannot get device params: %s",
              sdrplay_api_GetErrorString(err));
 
-    /* Init with default params -- all configuration applied via Update after */
+    /* Configure all parameters on the struct before Init.
+     * Init applies everything atomically -- no post-Init Update needed
+     * for initial configuration. Only bias tee uses Update (post-stream). */
+    sdrplay_api_DevParamsT *devp = ctx->params->devParams;
+    sdrplay_api_RxChannelParamsT *chp = ctx->params->rxChannelA;
+
+    /* Frequency */
+    chp->tunerParams.rfFreq.rfHz = center_freq;
+
+    /* Sample rate and bandwidth */
+    devp->fsFreq.fsHz = samp_rate;
+    chp->tunerParams.bwType = pick_bandwidth(samp_rate);
+    chp->tunerParams.ifType = sdrplay_api_IF_Zero;
+
+    /* DC and IQ correction */
+    chp->ctrlParams.dcOffset.DCenable = 1;
+    chp->ctrlParams.dcOffset.IQenable = 1;
+
+    /* Gain / AGC configuration.
+     * If --sdrplay-gain was specified, disable AGC and use manual gRdB.
+     * Otherwise, enable AGC and let the hardware manage levels. */
+    if (sdrplay_gain_val >= 0) {
+        int grdb = sdrplay_gain_val;
+        if (grdb < 20) grdb = 20;
+        if (grdb > 59) grdb = 59;
+        chp->tunerParams.gain.gRdB = grdb;
+        chp->tunerParams.gain.LNAstate = 0;
+        chp->ctrlParams.agc.enable = sdrplay_api_AGC_DISABLE;
+        fprintf(stderr, "sdrplay: AGC disabled, manual gRdB=%d LNA=0\n", grdb);
+    } else {
+        chp->ctrlParams.agc.enable = sdrplay_api_AGC_5HZ;
+        chp->ctrlParams.agc.setPoint_dBfs = -30;
+        fprintf(stderr, "sdrplay: AGC enabled (5 Hz)\n");
+    }
+
+    /* Bias tee (set on struct before Init, like dumpvdl2) */
+    if (bias_tee) {
+        switch (ctx->device.hwVer) {
+        case SDRPLAY_RSP1A_ID:
+        case SDRPLAY_RSP1B_ID:
+            chp->rsp1aTunerParams.biasTEnable = 1;
+            break;
+        case SDRPLAY_RSP2_ID:
+            chp->rsp2TunerParams.antennaSel = sdrplay_api_Rsp2_ANTENNA_B;
+            chp->rsp2TunerParams.biasTEnable = 1;
+            break;
+        case SDRPLAY_RSPduo_ID:
+            chp->rspDuoTunerParams.biasTEnable = 1;
+            break;
+        case SDRPLAY_RSPdx_ID:
+        case SDRPLAY_RSPdxR2_ID:
+            devp->rspDxParams.antennaSel = sdrplay_api_RspDx_ANTENNA_B;
+            devp->rspDxParams.biasTEnable = 1;
+            break;
+        default:
+            warnx("sdrplay: bias tee not supported on this model");
+            break;
+        }
+        fprintf(stderr, "sdrplay: bias tee enabled\n");
+    }
+
+    /* Init applies all params and starts streaming */
     sdrplay_api_CallbackFnsT cbFns;
     cbFns.StreamACbFn = stream_callback;
     cbFns.StreamBCbFn = stream_callback;  /* unused for single tuner */
@@ -291,112 +352,6 @@ void *sdrplay_setup(const char *serial)
     }
     ctx->initialized = 1;
 
-    /* Now apply all parameters via Update calls (SatDump pattern) */
-    sdrplay_api_DevParamsT *devp = ctx->params->devParams;
-    sdrplay_api_RxChannelParamsT *chp = ctx->params->rxChannelA;
-
-    /* Frequency */
-    chp->tunerParams.rfFreq.rfHz = center_freq;
-    err = sdrplay_api_Update(ctx->device.dev, ctx->device.tuner,
-                             sdrplay_api_Update_Tuner_Frf,
-                             sdrplay_api_Update_Ext1_None);
-    if (err != sdrplay_api_Success)
-        warnx("sdrplay: failed to set frequency: %s",
-              sdrplay_api_GetErrorString(err));
-
-    /* Sample rate and bandwidth */
-    devp->fsFreq.fsHz = samp_rate;
-    chp->tunerParams.bwType = pick_bandwidth(samp_rate);
-    chp->tunerParams.ifType = sdrplay_api_IF_Zero;
-    err = sdrplay_api_Update(ctx->device.dev, ctx->device.tuner,
-                             sdrplay_api_Update_Dev_Fs |
-                             sdrplay_api_Update_Tuner_BwType |
-                             sdrplay_api_Update_Tuner_IfType,
-                             sdrplay_api_Update_Ext1_None);
-    if (err != sdrplay_api_Success)
-        warnx("sdrplay: failed to set sample rate: %s",
-              sdrplay_api_GetErrorString(err));
-
-    /* Disable AGC */
-    chp->ctrlParams.agc.enable = sdrplay_api_AGC_DISABLE;
-    err = sdrplay_api_Update(ctx->device.dev, ctx->device.tuner,
-                             sdrplay_api_Update_Ctrl_Agc,
-                             sdrplay_api_Update_Ext1_None);
-    if (err != sdrplay_api_Success)
-        warnx("sdrplay: failed to disable AGC: %s",
-              sdrplay_api_GetErrorString(err));
-
-    /* Gain: set IF gain reduction and LNA state */
-    int gain_db = sdrplay_gain_val;
-    if (gain_db < 0)  gain_db = 0;
-    if (gain_db > 59) gain_db = 59;
-    chp->tunerParams.gain.gRdB = 59 - gain_db;
-    chp->tunerParams.gain.LNAstate = 0;
-    if (gain_db < 20)
-        chp->tunerParams.gain.LNAstate = 4;
-    else if (gain_db < 30)
-        chp->tunerParams.gain.LNAstate = 2;
-    err = sdrplay_api_Update(ctx->device.dev, ctx->device.tuner,
-                             sdrplay_api_Update_Tuner_Gr,
-                             sdrplay_api_Update_Ext1_None);
-    if (err != sdrplay_api_Success)
-        warnx("sdrplay: failed to set gain: %s",
-              sdrplay_api_GetErrorString(err));
-
-    /* DC and IQ correction */
-    chp->ctrlParams.dcOffset.DCenable = 1;
-    chp->ctrlParams.dcOffset.IQenable = 1;
-    err = sdrplay_api_Update(ctx->device.dev, ctx->device.tuner,
-                             sdrplay_api_Update_Ctrl_DCoffsetIQimbalance,
-                             sdrplay_api_Update_Ext1_None);
-    if (err != sdrplay_api_Success)
-        warnx("sdrplay: failed to set DC offset: %s",
-              sdrplay_api_GetErrorString(err));
-
-    /* Bias tee (device-specific, applied via Update) */
-    if (bias_tee) {
-        sdrplay_api_ReasonForUpdateT reason = sdrplay_api_Update_None;
-        sdrplay_api_ReasonForUpdateExtension1T ext1 =
-            sdrplay_api_Update_Ext1_None;
-
-        switch (ctx->device.hwVer) {
-        case SDRPLAY_RSP1A_ID:
-        case SDRPLAY_RSP1B_ID:
-            chp->rsp1aTunerParams.biasTEnable = 1;
-            reason = sdrplay_api_Update_Rsp1a_BiasTControl;
-            break;
-        case SDRPLAY_RSP2_ID:
-            chp->rsp2TunerParams.biasTEnable = 1;
-            reason = sdrplay_api_Update_Rsp2_BiasTControl;
-            warnx("sdrplay: RSP2 bias tee only on Antenna B port");
-            break;
-        case SDRPLAY_RSPduo_ID:
-            chp->rspDuoTunerParams.biasTEnable = 1;
-            reason = sdrplay_api_Update_RspDuo_BiasTControl;
-            break;
-        case SDRPLAY_RSPdx_ID:
-        case SDRPLAY_RSPdxR2_ID:
-            devp->rspDxParams.biasTEnable = 1;
-            ext1 = sdrplay_api_Update_RspDx_BiasTControl;
-            warnx("sdrplay: RSPdx bias tee only on Antenna B port");
-            break;
-        default:
-            warnx("sdrplay: bias tee not supported on this model");
-            break;
-        }
-
-        if (reason != sdrplay_api_Update_None ||
-            ext1 != sdrplay_api_Update_Ext1_None) {
-            err = sdrplay_api_Update(ctx->device.dev, ctx->device.tuner,
-                                     reason, ext1);
-            if (err != sdrplay_api_Success)
-                warnx("sdrplay: failed to enable bias tee: %s",
-                      sdrplay_api_GetErrorString(err));
-            else
-                fprintf(stderr, "sdrplay: bias tee enabled\n");
-        }
-    }
-
     /* Turn off debug now that setup is complete */
     sdrplay_api_DebugEnable(ctx->device.dev, sdrplay_api_DbgLvl_Disable);
 
@@ -411,9 +366,10 @@ void *sdrplay_setup(const char *serial)
     case SDRPLAY_RSPdxR2_ID: model = "RSPdxR2";  break;
     default:                 model = "Unknown";  break;
     }
-    fprintf(stderr, "sdrplay: %s serial=%s sr=%.0f freq=%.0f bw=%d gain=%d\n",
+    fprintf(stderr, "sdrplay: %s serial=%s sr=%.0f freq=%.0f bw=%d %s\n",
             model, ctx->device.SerNo, samp_rate, center_freq,
-            (int)chp->tunerParams.bwType, sdrplay_gain_val);
+            (int)chp->tunerParams.bwType,
+            sdrplay_gain_val >= 0 ? "gain=manual" : "gain=AGC");
 
     return ctx;
 }

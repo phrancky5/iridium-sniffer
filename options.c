@@ -139,7 +139,7 @@ static void usage(int exitcode) {
 "    --bladerf-gain=GAIN     BladeRF gain in dB (default: 40)\n"
 "    --usrp-gain=GAIN        USRP gain in dB (default: 40)\n"
 "    --soapy-gain=GAIN       SoapySDR gain in dB (default: 30)\n"
-"    --sdrplay-gain=GAIN    SDRplay gain in dB (default: 40)\n"
+"    --sdrplay-gain=GAIN    SDRplay IF gain reduction 20-59, disables AGC (default: AGC on)\n"
 "    --soapy-setting=K:V    SoapySDR device setting (repeatable)\n"
 "                             e.g. bitpack:true (Airspy), biastee_rx:true (bladeRF)\n"
 "\n"
