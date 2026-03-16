@@ -11,6 +11,7 @@
 
 #define _GNU_SOURCE
 #include <complex.h>
+#include <err.h>
 #include <math.h>
 #include <signal.h>
 #include <stdatomic.h>
@@ -292,6 +293,8 @@ burst_detector_t *burst_detector_create(burst_config_t *config) {
                                      d->fft_in, d->fft_out,
                                      FFTW_FORWARD, FFTW_MEASURE);
     fftw_unlock();
+    if (!d->fft_plan)
+        errx(1, "burst_detect: FFTW plan failed (size %d)", d->fft_size);
 
     /* Window: Blackman scaled by 1/0.42 for accurate SNR */
     d->window = aligned_alloc_32(sizeof(float) * d->fft_size);

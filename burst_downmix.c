@@ -21,6 +21,7 @@
 
 #define _GNU_SOURCE
 #include <complex.h>
+#include <err.h>
 #include <math.h>
 #include <signal.h>
 #include <stdatomic.h>
@@ -208,6 +209,8 @@ static void generate_sync_word(burst_downmix_t *dm, const int *uw, int uw_len,
                                          sync_fft_in, sync_fft_result,
                                          FFTW_FORWARD, FFTW_ESTIMATE);
     fftw_unlock();
+    if (!plan)
+        errx(1, "burst_downmix: FFTW sync plan failed (size %d)", dm->corr_fft_size);
     fftwf_execute(plan);
 
     fftw_lock();
@@ -354,6 +357,9 @@ burst_downmix_t *burst_downmix_create(downmix_config_t *config) {
                                                 dm->corr_ul_ifft_out,
                                                 FFTW_BACKWARD, FFTW_MEASURE);
     fftw_unlock();
+    if (!dm->cfo_fft_plan || !dm->corr_fwd_plan ||
+        !dm->corr_dl_ifft_plan || !dm->corr_ul_ifft_plan)
+        errx(1, "burst_downmix: FFTW plan creation failed");
 
     /* Generate sync word FFTs */
     generate_sync_word(dm, IR_UW_DL, IR_UW_LENGTH,

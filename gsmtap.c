@@ -10,6 +10,7 @@
  */
 
 #include <arpa/inet.h>
+#include <err.h>
 #include <netinet/in.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -86,8 +87,11 @@ void gsmtap_send(const uint8_t *data, int len,
 
     memcpy(pkt + 16, data, len);
 
-    sendto(gsmtap_fd, pkt, 16 + len, 0,
-           (struct sockaddr *)&gsmtap_addr, sizeof(gsmtap_addr));
+    if (sendto(gsmtap_fd, pkt, 16 + len, 0,
+               (struct sockaddr *)&gsmtap_addr, sizeof(gsmtap_addr)) < 0) {
+        static int warned;
+        if (!warned) { warn("gsmtap: sendto"); warned = 1; }
+    }
 }
 
 void gsmtap_shutdown(void)

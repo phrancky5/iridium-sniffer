@@ -14,6 +14,7 @@
  */
 
 #include <arpa/inet.h>
+#include <err.h>
 #include <errno.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -105,8 +106,12 @@ static void json_buf_emit(void)
     /* UDP streams (--acars-udp, one or more endpoints) */
     for (int i = 0; i < udp_count; i++) {
         if (udp_fds[i] >= 0) {
-            sendto(udp_fds[i], json_buf, json_pos, 0,
-                   (struct sockaddr *)&udp_addrs[i], sizeof(udp_addrs[i]));
+            if (sendto(udp_fds[i], json_buf, json_pos, 0,
+                       (struct sockaddr *)&udp_addrs[i],
+                       sizeof(udp_addrs[i])) < 0) {
+                static int warned;
+                if (!warned) { warn("acars-udp: sendto"); warned = 1; }
+            }
         }
     }
 }
@@ -172,9 +177,13 @@ static void hub_buf_emit(void)
     if (hub_pos == 0) return;
 
     /* UDP to acarshub */
-    if (hub_fd >= 0)
-        sendto(hub_fd, hub_buf, hub_pos, 0,
-               (struct sockaddr *)&hub_addr, sizeof(hub_addr));
+    if (hub_fd >= 0) {
+        if (sendto(hub_fd, hub_buf, hub_pos, 0,
+                   (struct sockaddr *)&hub_addr, sizeof(hub_addr)) < 0) {
+            static int warned;
+            if (!warned) { warn("feed-udp: sendto"); warned = 1; }
+        }
+    }
 
     /* TCP to airframes.io */
     if (airframes_fd >= 0 || airframes_saved_host) {
