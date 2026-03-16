@@ -60,16 +60,18 @@ static int udp_count = 0;
 static int udp_fds[UDP_MAX];
 static struct sockaddr_in udp_addrs[UDP_MAX];
 
-/* ---- Aggregator feed: UDP endpoint (iridium-toolkit format) ---- */
+/* ---- Aggregator feed endpoints (iridium-toolkit format, mixed UDP/TCP) ---- */
 
-static int hub_fd = -1;
-static struct sockaddr_in hub_addr;
-
-/* ---- Aggregator feed: TCP endpoint (iridium-toolkit format) ---- */
-
-static int airframes_fd = -1;
-static char *airframes_saved_host = NULL;
-static int airframes_saved_port = 0;
+#define FEED_MAX 4
+typedef struct {
+    int fd;
+    int is_tcp;
+    struct sockaddr_in udp_addr;   /* UDP only */
+    char *tcp_host;                /* TCP only (for reconnect) */
+    int tcp_port;                  /* TCP only */
+} feed_ep_t;
+static feed_ep_t feeds[FEED_MAX];
+static int n_feeds = 0;
 
 /* JSON output buffer -- used to build JSON for dual stdout/UDP dispatch */
 #define JSON_BUF_SIZE 8192
@@ -141,8 +143,11 @@ static void hub_buf_append(const char *fmt, ...)
     if (hub_pos >= JSON_BUF_SIZE) hub_pos = JSON_BUF_SIZE - 1;
 }
 
-/* Attempt TCP connection to airframes endpoint (hostname resolved via getaddrinfo) */
-static int airframes_connect(const char *host, int port)
+/* Check if any feed endpoint is configured */
+static int feed_any_active(void) { return n_feeds > 0; }
+
+/* Attempt TCP connection (hostname resolved via getaddrinfo) */
+static int feed_tcp_connect(const char *host, int port)
 {
     char port_str[16];
     snprintf(port_str, sizeof(port_str), "%d", port);
@@ -176,35 +181,36 @@ static void hub_buf_emit(void)
 {
     if (hub_pos == 0) return;
 
-    /* UDP to acarshub */
-    if (hub_fd >= 0) {
-        if (sendto(hub_fd, hub_buf, hub_pos, 0,
-                   (struct sockaddr *)&hub_addr, sizeof(hub_addr)) < 0) {
-            static int warned;
-            if (!warned) { warn("feed-udp: sendto"); warned = 1; }
-        }
-    }
+    for (int i = 0; i < n_feeds; i++) {
+        feed_ep_t *f = &feeds[i];
 
-    /* TCP to airframes.io */
-    if (airframes_fd >= 0 || airframes_saved_host) {
-        /* Reconnect if needed */
-        if (airframes_fd < 0 && airframes_saved_host) {
-            airframes_fd = airframes_connect(airframes_saved_host,
-                                             airframes_saved_port);
-            if (airframes_fd >= 0)
-                fprintf(stderr, "ACARS: reconnected to airframes %s:%d\n",
-                        airframes_saved_host, airframes_saved_port);
-        }
+        if (!f->is_tcp) {
+            /* UDP feed */
+            if (f->fd >= 0) {
+                if (sendto(f->fd, hub_buf, hub_pos, 0,
+                           (struct sockaddr *)&f->udp_addr,
+                           sizeof(f->udp_addr)) < 0) {
+                    static int warned;
+                    if (!warned) { warn("feed-udp: sendto"); warned = 1; }
+                }
+            }
+        } else {
+            /* TCP feed -- reconnect if needed */
+            if (f->fd < 0 && f->tcp_host) {
+                f->fd = feed_tcp_connect(f->tcp_host, f->tcp_port);
+                if (f->fd >= 0)
+                    fprintf(stderr, "ACARS: reconnected to %s:%d\n",
+                            f->tcp_host, f->tcp_port);
+            }
 
-        if (airframes_fd >= 0) {
-            /* Send JSON + newline over TCP (MSG_NOSIGNAL avoids SIGPIPE) */
-            ssize_t r = send(airframes_fd, hub_buf, hub_pos, MSG_NOSIGNAL);
-            if (r > 0)
-                r = send(airframes_fd, "\n", 1, MSG_NOSIGNAL);
-            if (r <= 0) {
-                /* Connection lost -- close and retry next message */
-                close(airframes_fd);
-                airframes_fd = -1;
+            if (f->fd >= 0) {
+                ssize_t r = send(f->fd, hub_buf, hub_pos, MSG_NOSIGNAL);
+                if (r > 0)
+                    r = send(f->fd, "\n", 1, MSG_NOSIGNAL);
+                if (r <= 0) {
+                    close(f->fd);
+                    f->fd = -1;
+                }
             }
         }
     }
@@ -251,7 +257,7 @@ static void hub_emit_acars(const char *mode, const char *reg, char ack,
                             uint64_t timestamp, double frequency,
                             float magnitude, const uint8_t *hdr, int hdr_len)
 {
-    if (hub_fd < 0 && airframes_fd < 0 && !airframes_saved_host) return;
+    if (!feed_any_active()) return;
 
     /* Timestamp as ISO-8601 -- use wall clock for feed output so
      * aggregators (acars_router) don't reject messages as stale
@@ -606,7 +612,7 @@ static void acars_parse_libacars(const uint8_t *data, int len, int ul,
     }
 
     /* acarshub/airframes compat output (iridium-toolkit format) */
-    if ((hub_fd >= 0 || airframes_fd >= 0 || airframes_saved_host) &&
+    if (feed_any_active() &&
         !msg->err) {
         char mode_str[2] = { msg->mode, '\0' };
 
@@ -1039,7 +1045,7 @@ static void acars_parse_fallback(const uint8_t *data, int len, int ul,
                           hdr, hdr_len, errors);
 
     /* acarshub/airframes compat output (iridium-toolkit format) */
-    if ((hub_fd >= 0 || airframes_fd >= 0 || airframes_saved_host) &&
+    if (feed_any_active() &&
         errors == 0) {
         char mode_str[2] = { (char)stripped[0], '\0' };
 
@@ -1344,8 +1350,8 @@ static void sbd_extract(const uint8_t *data, int len, int ul,
 
 void acars_init(const char *station_id, const char **udp_hosts,
                 const int *udp_ports, int n_udp,
-                const char *hub_host, int hub_port,
-                const char *af_host, int af_port)
+                const char **f_hosts, const int *f_ports,
+                const int *f_tcp, int nf)
 {
     station = station_id;
     memset(sbd_multi, 0, sizeof(sbd_multi));
@@ -1377,38 +1383,47 @@ void acars_init(const char *station_id, const char **udp_hosts,
                 udp_hosts[i], udp_ports[i]);
     }
 
-    /* acarshub compatibility endpoint (iridium-toolkit format, UDP) */
-    if (hub_host && hub_port > 0) {
-        hub_fd = socket(AF_INET, SOCK_DGRAM, 0);
-        if (hub_fd < 0) {
-            perror("acars_init: acarshub socket");
-        } else {
-            memset(&hub_addr, 0, sizeof(hub_addr));
-            hub_addr.sin_family = AF_INET;
-            hub_addr.sin_port = htons(hub_port);
-            if (resolve_host_ipv4(hub_host, &hub_addr.sin_addr) < 0) {
-                fprintf(stderr, "acars_init: cannot resolve acarshub host '%s'\n",
-                        hub_host);
-                close(hub_fd);
-                hub_fd = -1;
-            } else {
-                fprintf(stderr, "ACARS: acarshub UDP stream -> %s:%d\n",
-                        hub_host, hub_port);
-            }
-        }
-    }
+    /* Aggregator feed endpoints (iridium-toolkit format, mixed UDP/TCP) */
+    n_feeds = 0;
+    for (int i = 0; i < nf && i < FEED_MAX; i++) {
+        feed_ep_t *f = &feeds[n_feeds];
+        memset(f, 0, sizeof(*f));
+        f->fd = -1;
+        f->is_tcp = f_tcp[i];
 
-    /* airframes.io direct feed (iridium-toolkit format, TCP) */
-    if (af_host && af_port > 0) {
-        airframes_saved_host = strdup(af_host);
-        airframes_saved_port = af_port;
-        airframes_fd = airframes_connect(af_host, af_port);
-        if (airframes_fd >= 0)
-            fprintf(stderr, "ACARS: airframes TCP stream -> %s:%d\n",
-                    af_host, af_port);
-        else
-            fprintf(stderr, "ACARS: airframes %s:%d connect failed "
-                    "(will retry on first message)\n", af_host, af_port);
+        if (!f->is_tcp) {
+            /* UDP feed */
+            f->fd = socket(AF_INET, SOCK_DGRAM, 0);
+            if (f->fd < 0) {
+                perror("acars_init: feed UDP socket");
+                continue;
+            }
+            memset(&f->udp_addr, 0, sizeof(f->udp_addr));
+            f->udp_addr.sin_family = AF_INET;
+            f->udp_addr.sin_port = htons(f_ports[i]);
+            if (resolve_host_ipv4(f_hosts[i], &f->udp_addr.sin_addr) < 0) {
+                fprintf(stderr, "acars_init: cannot resolve feed host '%s'\n",
+                        f_hosts[i]);
+                close(f->fd);
+                f->fd = -1;
+                continue;
+            }
+            fprintf(stderr, "ACARS: feed UDP -> %s:%d\n",
+                    f_hosts[i], f_ports[i]);
+        } else {
+            /* TCP feed */
+            f->tcp_host = strdup(f_hosts[i]);
+            f->tcp_port = f_ports[i];
+            f->fd = feed_tcp_connect(f_hosts[i], f_ports[i]);
+            if (f->fd >= 0)
+                fprintf(stderr, "ACARS: feed TCP -> %s:%d\n",
+                        f_hosts[i], f_ports[i]);
+            else
+                fprintf(stderr, "ACARS: feed TCP %s:%d connect failed "
+                        "(will retry on first message)\n",
+                        f_hosts[i], f_ports[i]);
+        }
+        n_feeds++;
     }
 
 #ifdef HAVE_LIBACARS
@@ -1428,16 +1443,15 @@ void acars_shutdown(void)
         }
     }
     udp_count = 0;
-    if (hub_fd >= 0) {
-        close(hub_fd);
-        hub_fd = -1;
+    for (int i = 0; i < n_feeds; i++) {
+        if (feeds[i].fd >= 0) {
+            close(feeds[i].fd);
+            feeds[i].fd = -1;
+        }
+        free(feeds[i].tcp_host);
+        feeds[i].tcp_host = NULL;
     }
-    if (airframes_fd >= 0) {
-        close(airframes_fd);
-        airframes_fd = -1;
-    }
-    free(airframes_saved_host);
-    airframes_saved_host = NULL;
+    n_feeds = 0;
 #ifdef HAVE_LIBACARS
     if (reasm_ctx) {
         la_reasm_ctx_destroy(reasm_ctx);

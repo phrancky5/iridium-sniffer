@@ -17,12 +17,12 @@
 /* Initialize ACARS subsystem. station_id may be NULL.
  * udp_hosts/udp_ports are parallel arrays of length udp_count for
  * JSON streaming to one or more remote endpoints (dumpvdl2 format).
- * hub_host/hub_port is the optional --feed UDP endpoint (iridium-toolkit format).
- * af_host/af_port is the optional --feed TCP endpoint (iridium-toolkit format). */
+ * feed_hosts/feed_ports/feed_tcp are parallel arrays of length n_feed for
+ * aggregator feeds (iridium-toolkit format, mixed UDP and TCP). */
 void acars_init(const char *station_id, const char **udp_hosts,
                 const int *udp_ports, int udp_count,
-                const char *hub_host, int hub_port,
-                const char *af_host, int af_port);
+                const char **feed_hosts, const int *feed_ports,
+                const int *feed_tcp, int n_feed);
 
 /* IDA message callback for ACARS processing.
  * Pass this to ida_reassemble() as the callback function. */

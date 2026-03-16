@@ -167,6 +167,9 @@ cmake .. -DCMAKE_BUILD_TYPE=Debug
 # Feed acarshub via UDP (iridium-toolkit JSON format)
 ./iridium-sniffer -i soapy-0 --feed=udp://127.0.0.1:5558 --station=MYSTATION
 
+# Feed both acarshub and airframes.io simultaneously
+./iridium-sniffer -i soapy-0 --feed=udp://127.0.0.1:5558 --feed --station=MYSTATION
+
 # Stream JSON via UDP (dumpvdl2 format, for future aggregator support)
 ./iridium-sniffer -i soapy-0 --acars-udp=192.168.1.100:5555 --station=MYSTATION
 
@@ -345,7 +348,7 @@ These flags control ACARS/SBD output, and can be combined:
 | `--acars` | Human-readable text to stdout |
 | `--acars-json` | JSON to stdout (dumpvdl2/dumphfdl format) |
 | `--acars-udp=HOST:PORT` | JSON via UDP (dumpvdl2/dumphfdl format, repeatable, max 4) |
-| `--feed[=PROTO://HOST:PORT]` | Feed aggregator (iridium-toolkit JSON format, UDP or TCP) |
+| `--feed[=PROTO://HOST:PORT]` | Feed aggregator (iridium-toolkit JSON format, repeatable, max 4) |
 
 This replaces the `reassembler.py -m acars` pipeline entirely -- no Python needed. When [libacars-2](https://github.com/szpajder/libacars) is installed, ARINC-622 application payloads (ADS-C, CPDLC, OHMA, MIAM) are fully decoded. Without libacars, basic ACARS field extraction still works.
 
@@ -364,6 +367,9 @@ This replaces the `reassembler.py -m acars` pipeline entirely -- no Python neede
 
 # Feed airframes.io directly via TCP (iridium-toolkit JSON format)
 ./iridium-sniffer -i usrp-B210-SERIAL --feed --station=MYSTATION
+
+# Feed both acarshub (UDP) and airframes.io (TCP) simultaneously
+./iridium-sniffer -i usrp-B210-SERIAL --feed=udp://127.0.0.1:5558 --feed --station=MYSTATION
 
 # Text on stdout + UDP JSON stream simultaneously
 ./iridium-sniffer -i usrp-B210-SERIAL --acars --acars-udp=192.168.1.100:5555 --station=MYSTATION
@@ -517,6 +523,12 @@ iridium-sniffer replaces that entire chain with a single `--feed` flag. The feed
 
 ```bash
 ./iridium-sniffer -i soapy-0 --feed=tcp://127.0.0.1:15590 --station=MYSTATION
+```
+
+**Feed both acarshub and airframes.io simultaneously** (`--feed` is repeatable, max 4):
+
+```bash
+./iridium-sniffer -i soapy-0 --feed=udp://127.0.0.1:5558 --feed --station=MYSTATION
 ```
 
 Add `--acars` for human-readable text output locally while feeding:
@@ -801,6 +813,7 @@ ACARS:
     --feed[=PROTO://HOST:PORT]  feed aggregator (iridium-toolkit JSON format)
                              udp://HOST:PORT for acarshub, tcp://HOST:PORT for airframes.io
                              bare --feed defaults to tcp://feed.airframes.io:5590
+                             repeatable (max 4, mix udp:// and tcp://)
     --station=ID            station identifier for JSON output
 
 ZMQ:

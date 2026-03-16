@@ -97,10 +97,11 @@ extern char *station_id;
 extern char *acars_udp_hosts[ACARS_UDP_MAX];
 extern int acars_udp_ports[ACARS_UDP_MAX];
 extern int acars_udp_count;
-extern char *feed_udp_host;
-extern int feed_udp_port;
-extern char *feed_tcp_host;
-extern int feed_tcp_port;
+#define FEED_MAX 4
+extern char *feed_hosts[FEED_MAX];
+extern int feed_ports[FEED_MAX];
+extern int feed_is_tcp[FEED_MAX];
+extern int feed_count;
 extern int zmq_enabled;
 extern char *zmq_endpoint;
 extern int zmq_sub_enabled;
@@ -177,6 +178,7 @@ static void usage(int exitcode) {
 "                             udp://HOST:PORT for acarshub (e.g. udp://127.0.0.1:5558)\n"
 "                             tcp://HOST:PORT for airframes.io direct\n"
 "                             bare --feed defaults to tcp://feed.airframes.io:5590\n"
+"                             repeatable (max 4, mix udp:// and tcp://)\n"
 "    --station=ID          station identifier for ACARS JSON output\n"
 #ifdef HAVE_ZMQ
 "    --zmq[=ENDPOINT]     publish output via ZMQ PUB socket for multi-consumer\n"
@@ -490,10 +492,14 @@ void parse_options(int argc, char **argv) {
 
             case OPT_FEED:
                 acars_enabled = 1;
+                if (feed_count >= FEED_MAX)
+                    errx(1, "Too many --feed endpoints (max %d)", FEED_MAX);
                 if (!optarg) {
                     /* bare --feed defaults to airframes.io TCP */
-                    feed_tcp_host = strdup("feed.airframes.io");
-                    feed_tcp_port = 5590;
+                    feed_hosts[feed_count] = strdup("feed.airframes.io");
+                    feed_ports[feed_count] = 5590;
+                    feed_is_tcp[feed_count] = 1;
+                    feed_count++;
                 } else if (strncmp(optarg, "udp://", 6) == 0) {
                     char *addr = optarg + 6;
                     char *colon = strrchr(addr, ':');
@@ -504,8 +510,10 @@ void parse_options(int argc, char **argv) {
                     int port = atoi(colon + 1);
                     if (port <= 0 || port > 65535)
                         errx(1, "Invalid feed port: %s", colon + 1);
-                    feed_udp_host = strdup(addr);
-                    feed_udp_port = port;
+                    feed_hosts[feed_count] = strdup(addr);
+                    feed_ports[feed_count] = port;
+                    feed_is_tcp[feed_count] = 0;
+                    feed_count++;
                 } else if (strncmp(optarg, "tcp://", 6) == 0) {
                     char *addr = optarg + 6;
                     char *colon = strrchr(addr, ':');
@@ -516,8 +524,10 @@ void parse_options(int argc, char **argv) {
                     int port = atoi(colon + 1);
                     if (port <= 0 || port > 65535)
                         errx(1, "Invalid feed port: %s", colon + 1);
-                    feed_tcp_host = strdup(addr);
-                    feed_tcp_port = port;
+                    feed_hosts[feed_count] = strdup(addr);
+                    feed_ports[feed_count] = port;
+                    feed_is_tcp[feed_count] = 1;
+                    feed_count++;
                 } else {
                     errx(1, "--feed requires udp:// or tcp:// prefix "
                          "(e.g. --feed=udp://127.0.0.1:5558 or "
