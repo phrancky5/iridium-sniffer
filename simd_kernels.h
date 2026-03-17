@@ -133,8 +133,39 @@ float generic_max_float(const float *in, int n);
 void generic_csquare_window(const float complex *in, const float *window,
                             float complex *out, int n);
 
-/* ---- AVX2 implementations (only on x86_64) ---- */
+/* ---- SIMD mode selection ---- */
+typedef enum {
+    SIMD_AUTO = 0,
+    SIMD_AVX2,
+    SIMD_SSE42,
+    SIMD_SCALAR,
+} simd_mode_t;
+
+/* ---- SSE4.2 implementations (x86 only) ---- */
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+
+void sse42_fir_ccf(const float *taps, int ntaps,
+                   const float complex *in, float complex *out, int n);
+void sse42_fir_ccf_dec(const float *taps, int ntaps,
+                       const float complex *in, float complex *out,
+                       int n_out, int decimation);
+void sse42_fir_fff(const float *taps, int ntaps,
+                   const float *in, float *out, int n);
+void sse42_window_cf(const float complex *samples, const float *window,
+                     float complex *out, int n);
+void sse42_fftshift_mag(const float complex *fft_out,
+                        float *mag_shifted, int fft_size);
+void sse42_baseline_update(float *sum, const float *old_hist,
+                           const float *new_mag, int n);
+void sse42_relative_mag(const float *mag, const float *baseline,
+                        float *out, int n);
+void sse42_convert_i8_cf(const int8_t *iq, float complex *out, size_t n);
+void sse42_mag_squared(const float complex *in, float *out, int n);
+float sse42_max_float(const float *in, int n);
+void sse42_csquare_window(const float complex *in, const float *window,
+                          float complex *out, int n);
+
+/* ---- AVX2 implementations (x86 only) ---- */
 
 void avx2_fir_ccf(const float *taps, int ntaps,
                    const float complex *in, float complex *out, int n);

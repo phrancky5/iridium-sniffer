@@ -30,45 +30,90 @@ simd_csquare_window_fn simd_csquare_window = NULL;
 
 /* ---- Runtime dispatch ---- */
 
-void simd_init(int force_generic) {
-    int use_avx2 = 0;
+static void set_scalar(void) {
+    simd_fir_ccf        = generic_fir_ccf;
+    simd_fir_ccf_dec    = generic_fir_ccf_dec;
+    simd_fir_fff        = generic_fir_fff;
+    simd_window_cf      = generic_window_cf;
+    simd_fftshift_mag   = generic_fftshift_mag;
+    simd_baseline_update = generic_baseline_update;
+    simd_relative_mag   = generic_relative_mag;
+    simd_convert_i8_cf  = generic_convert_i8_cf;
+    simd_mag_squared    = generic_mag_squared;
+    simd_max_float      = generic_max_float;
+    simd_csquare_window = generic_csquare_window;
+    fprintf(stderr, "iridium-sniffer: using scalar kernels\n");
+}
 
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-    if (!force_generic && __builtin_cpu_supports("avx2") &&
-        __builtin_cpu_supports("fma")) {
-        use_avx2 = 1;
-    }
+static void set_sse42(void) {
+    simd_fir_ccf        = sse42_fir_ccf;
+    simd_fir_ccf_dec    = sse42_fir_ccf_dec;
+    simd_fir_fff        = sse42_fir_fff;
+    simd_window_cf      = sse42_window_cf;
+    simd_fftshift_mag   = sse42_fftshift_mag;
+    simd_baseline_update = sse42_baseline_update;
+    simd_relative_mag   = sse42_relative_mag;
+    simd_convert_i8_cf  = sse42_convert_i8_cf;
+    simd_mag_squared    = sse42_mag_squared;
+    simd_max_float      = sse42_max_float;
+    simd_csquare_window = sse42_csquare_window;
+    fprintf(stderr, "iridium-sniffer: using SSE4.2 SIMD kernels\n");
+}
+
+static void set_avx2(void) {
+    simd_fir_ccf        = avx2_fir_ccf;
+    simd_fir_ccf_dec    = avx2_fir_ccf_dec;
+    simd_fir_fff        = avx2_fir_fff;
+    simd_window_cf      = avx2_window_cf;
+    simd_fftshift_mag   = avx2_fftshift_mag;
+    simd_baseline_update = avx2_baseline_update;
+    simd_relative_mag   = avx2_relative_mag;
+    simd_convert_i8_cf  = avx2_convert_i8_cf;
+    simd_mag_squared    = avx2_mag_squared;
+    simd_max_float      = avx2_max_float;
+    simd_csquare_window = avx2_csquare_window;
+    fprintf(stderr, "iridium-sniffer: using AVX2+FMA SIMD kernels\n");
+}
+
+static int cpu_has_avx2_fma(void) {
+    return __builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma");
+}
+
+static int cpu_has_sse42(void) {
+    return __builtin_cpu_supports("sse4.2");
+}
 #endif
 
-    if (use_avx2) {
+void simd_init(int mode) {
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-        simd_fir_ccf        = avx2_fir_ccf;
-        simd_fir_ccf_dec    = avx2_fir_ccf_dec;
-        simd_fir_fff        = avx2_fir_fff;
-        simd_window_cf      = avx2_window_cf;
-        simd_fftshift_mag   = avx2_fftshift_mag;
-        simd_baseline_update = avx2_baseline_update;
-        simd_relative_mag   = avx2_relative_mag;
-        simd_convert_i8_cf  = avx2_convert_i8_cf;
-        simd_mag_squared    = avx2_mag_squared;
-        simd_max_float      = avx2_max_float;
-        simd_csquare_window = avx2_csquare_window;
-        fprintf(stderr, "iridium-sniffer: using AVX2+FMA SIMD kernels\n");
-#endif
-    } else {
-        simd_fir_ccf        = generic_fir_ccf;
-        simd_fir_ccf_dec    = generic_fir_ccf_dec;
-        simd_fir_fff        = generic_fir_fff;
-        simd_window_cf      = generic_window_cf;
-        simd_fftshift_mag   = generic_fftshift_mag;
-        simd_baseline_update = generic_baseline_update;
-        simd_relative_mag   = generic_relative_mag;
-        simd_convert_i8_cf  = generic_convert_i8_cf;
-        simd_mag_squared    = generic_mag_squared;
-        simd_max_float      = generic_max_float;
-        simd_csquare_window = generic_csquare_window;
-        fprintf(stderr, "iridium-sniffer: using scalar SIMD kernels\n");
+    switch ((simd_mode_t)mode) {
+    case SIMD_AVX2:
+        if (cpu_has_avx2_fma()) { set_avx2(); return; }
+        fprintf(stderr, "iridium-sniffer: AVX2+FMA not available, ");
+        if (cpu_has_sse42()) { fprintf(stderr, "falling back to SSE4.2\n"); set_sse42(); return; }
+        fprintf(stderr, "falling back to scalar\n");
+        set_scalar();
+        return;
+    case SIMD_SSE42:
+        if (cpu_has_sse42()) { set_sse42(); return; }
+        fprintf(stderr, "iridium-sniffer: SSE4.2 not available, falling back to scalar\n");
+        set_scalar();
+        return;
+    case SIMD_SCALAR:
+        set_scalar();
+        return;
+    case SIMD_AUTO:
+    default:
+        if (cpu_has_avx2_fma()) { set_avx2(); return; }
+        if (cpu_has_sse42())    { set_sse42(); return; }
+        set_scalar();
+        return;
     }
+#else
+    (void)mode;
+    set_scalar();
+#endif
 }
 
 /* ---- Generic implementations ---- */

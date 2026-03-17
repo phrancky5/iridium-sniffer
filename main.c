@@ -141,7 +141,7 @@ int gsmtap_port = GSMTAP_DEFAULT_PORT;
 /* GPU acceleration: enabled by default, loaded via dlopen plugin at runtime */
 int use_gpu = 1;
 
-int no_simd = 0;
+int simd_mode = 0;  /* SIMD_AUTO */
 char *save_bursts_dir = NULL;
 int diagnostic_mode = 0;
 int use_gardner = 1;
@@ -817,7 +817,7 @@ int main(int argc, char **argv) {
     parse_options(argc, argv);
 
     /* Initialize SIMD dispatch (must be before any DSP) */
-    simd_init(no_simd);
+    simd_init(simd_mode);
 
     fprintf(stderr, "iridium-sniffer: center_freq=%.0f Hz, sample_rate=%.0f Hz, threshold=%.1f dB\n",
             center_freq, samp_rate, threshold_db);

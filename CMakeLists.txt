@@ -121,12 +121,16 @@ set(SOURCES
     ${PROJECT_SOURCE_DIR}/vita49.c
 )
 
-# AVX2 SIMD kernels (x86_64 only, compiled with -mavx2 -mfma)
+# SIMD kernels (x86 only, compiled with specific ISA flags, runtime-detected)
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64|x86|i[3-6]86")
+    set_source_files_properties(${PROJECT_SOURCE_DIR}/simd_sse42.c
+        PROPERTIES COMPILE_FLAGS "-msse4.2")
     set_source_files_properties(${PROJECT_SOURCE_DIR}/simd_avx2.c
         PROPERTIES COMPILE_FLAGS "-mavx2 -mfma")
-    list(APPEND SOURCES ${PROJECT_SOURCE_DIR}/simd_avx2.c)
-    message(STATUS "SIMD: AVX2 kernels enabled (runtime-detected)")
+    list(APPEND SOURCES
+        ${PROJECT_SOURCE_DIR}/simd_sse42.c
+        ${PROJECT_SOURCE_DIR}/simd_avx2.c)
+    message(STATUS "SIMD: SSE4.2 + AVX2 kernels enabled (runtime-detected)")
 else()
     message(STATUS "SIMD: scalar only (non-x86 platform)")
 endif()

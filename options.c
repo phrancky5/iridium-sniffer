@@ -17,6 +17,7 @@
 #include <unistd.h>
 
 #include "sdr.h"
+#include "simd_kernels.h"
 
 #ifdef HAVE_HACKRF
 #include "hackrf.h"
@@ -77,7 +78,7 @@ extern double soapy_gain_val;
 extern int sdrplay_gain_val;
 extern int bias_tee;
 extern int use_gpu;
-extern int no_simd;
+extern int simd_mode;
 extern int use_chase;
 extern char *save_bursts_dir;
 extern int web_enabled;
@@ -147,7 +148,8 @@ static void usage(int exitcode) {
 "Detection options:\n"
 "    -d, --threshold=DB      burst detection threshold in dB (default: 16.0)\n"
 "    --no-gpu                disable GPU acceleration (use CPU FFTW)\n"
-"    --no-simd               disable SIMD acceleration (use scalar kernels)\n"
+"    --simd=MODE             SIMD kernel selection: auto (default), avx2, sse42, scalar\n"
+"    --no-simd               alias for --simd=scalar\n"
 "    --chase[=N]             enable Chase soft-decision BCH decoder (experimental)\n"
 "                             N = flip-bits count, 0-7 (default 5 = 31 combos).\n"
 "                             0 or omitting --chase disables (default).\n"
@@ -238,6 +240,7 @@ void parse_options(int argc, char **argv) {
         OPT_LIST,
         OPT_NO_GPU,
         OPT_NO_SIMD,
+        OPT_SIMD,
         OPT_CHASE,
         OPT_WEB,
         OPT_GSMTAP,
@@ -282,6 +285,7 @@ void parse_options(int argc, char **argv) {
         { "soapy-gain",     required_argument, NULL, OPT_SOAPY_GAIN },
         { "no-gpu",         no_argument,       NULL, OPT_NO_GPU },
         { "no-simd",        no_argument,       NULL, OPT_NO_SIMD },
+        { "simd",           required_argument, NULL, OPT_SIMD },
         { "chase",          optional_argument, NULL, OPT_CHASE },
         { "web",            optional_argument, NULL, OPT_WEB },
         { "gsmtap",         optional_argument, NULL, OPT_GSMTAP },
@@ -405,7 +409,20 @@ void parse_options(int argc, char **argv) {
             case OPT_SOAPY_GAIN:  soapy_gain_val   = atof(optarg); break;
             case OPT_SDRPLAY_GAIN: sdrplay_gain_val = atoi(optarg); break;
             case OPT_NO_GPU:      use_gpu = 0;                       break;
-            case OPT_NO_SIMD:     no_simd = 1;                       break;
+            case OPT_NO_SIMD:     simd_mode = SIMD_SCALAR;           break;
+            case OPT_SIMD:
+                if (strcmp(optarg, "auto") == 0)
+                    simd_mode = SIMD_AUTO;
+                else if (strcmp(optarg, "avx2") == 0)
+                    simd_mode = SIMD_AVX2;
+                else if (strcmp(optarg, "sse42") == 0 || strcmp(optarg, "sse4.2") == 0)
+                    simd_mode = SIMD_SSE42;
+                else if (strcmp(optarg, "scalar") == 0 || strcmp(optarg, "none") == 0)
+                    simd_mode = SIMD_SCALAR;
+                else
+                    errx(1, "Unknown --simd mode '%s'. Use auto, avx2, sse42, or scalar.",
+                         optarg);
+                break;
             case OPT_CHASE:
                 use_chase = optarg ? atoi(optarg) : 0;
                 if (use_chase < 0 || use_chase > 7)
