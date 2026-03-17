@@ -932,6 +932,17 @@ RAW: i-10-t1 0000442.4080 1624960925 N:10.77-71.83 I:00000003560  50% 0.11738 17
 
 Fields are: file info, timestamp (ms), frequency (Hz), magnitude and noise floor (dB), burst ID, confidence (%), signal level, payload symbol count, and demodulated bits.
 
+### Signal Levels
+
+The `N:` field contains two values separated by a sign: **magnitude** and **noise floor**, both in dB.
+
+- **Magnitude** (`10*log10(burst_power / baseline)`) measures how far the burst rises above the averaged noise floor in the FFT. This is an SNR-like ratio, not an absolute power level.
+- **Noise floor** is in dBFS/Hz -- the averaged baseline power spectral density at the burst frequency.
+
+The magnitude calculation is equivalent to gr-iridium's approach (both measure burst power relative to baseline). However, differences in gain settings, sample rate, FFT size, and threshold will change which bursts are detected and the reported values. If signal levels appear lower than expected, check gain settings first -- the `--soapy-gain-element` or device-specific gain flags allow fine-tuning individual gain stages.
+
+The `signal level` field (e.g. `0.11738`) is the raw burst amplitude in linear scale, separate from the dB magnitude.
+
 This output is consumed directly by [iridium-toolkit](https://github.com/muccc/iridium-toolkit) for higher-layer protocol decoding including ACARS, SBD messaging, pager data, voice, and satellite telemetry.
 
 stderr shows a status line once per second in the same format as gr-iridium, so existing monitoring scripts work without changes.
