@@ -20,6 +20,7 @@ Native GSMTAP output (`--gsmtap`) sends decoded IDA (Iridium Data) frames direct
 - Native GSMTAP/LAPDm output to Wireshark (`--gsmtap`) for IDA frame analysis
 - Built-in web map with live satellite and ring alert visualization
 - Doppler-based receiver positioning from decoded satellite signals (`--position`)
+- AVX2 and SSE4.2 SIMD kernels with automatic runtime detection (`--simd`)
 - GPU-accelerated FFT burst detection (OpenCL or Vulkan)
 - ZMQ PUB/SUB output (`--zmq`) for multi-consumer iridium-toolkit compatibility
 - ZMQ SUB and VITA 49 (VRT) network IQ input for remote SDR and distributed setups
@@ -222,12 +223,13 @@ At 18 dB (gr-iridium's default), burst detection counts are nearly identical. Th
 |---------------|-----------|----------|-----------------|
 | AVX2 + GPU | 15.1s | 23.6s | 4.0x |
 | AVX2 only | 12.0s | 21.5s | 5.0x |
+| SSE4.2 only | - | - | ~3.5x est. |
 | Scalar + GPU | 16.1s | 42.6s | 3.7x |
 | Scalar only (baseline) | 13.0s | 40.6s | 4.6x |
 
-The AVX2 SIMD kernels provide a 1.9x CPU time reduction. GPU acceleration adds startup overhead for files this size but becomes beneficial for longer recordings and continuous live capture.
+Three SIMD tiers are available: AVX2+FMA (256-bit), SSE4.2 (128-bit), and scalar. The appropriate tier is selected automatically at startup via CPUID. Use `--simd=MODE` to force a specific path (auto/avx2/sse42/scalar) for testing or debugging. AVX2 provides ~1.9x CPU time reduction over scalar; SSE4.2 provides ~1.5x, which helps on CPUs without AVX2 (e.g. Intel Celeron J4105). GPU acceleration adds startup overhead for files this size but becomes beneficial for longer recordings and continuous live capture.
 
-All configurations produce identical demodulated output (frame count, bit content). GPU vs CPU may differ by a few frames due to floating-point rounding in the burst detection FFT.
+All SIMD configurations produce identical demodulated output (frame count, bit content). GPU vs CPU may differ by a few frames due to floating-point rounding in the burst detection FFT.
 
 The IDA decoder uses BCH(31,20) t=2 hard-decision error correction, identical to iridium-toolkit's `bch_repair()`. Standard BCH corrects up to 2 bit errors per 31-bit block. An experimental Chase soft-decision extension is available via `--chase=N` (N=1..7), which uses per-bit amplitude scores from the demodulator to attempt recovery of blocks with more than 2 errors on **IDA frames only** (IRA/IBC Chase is completely disabled). Chase recovery is off by default.
 
@@ -831,7 +833,8 @@ Output:
     --save-bursts=DIR       save IQ samples of decoded bursts to directory
     --diagnostic            setup verification mode (suppresses RAW output)
     --no-gardner            disable Gardner timing recovery (enabled by default)
-    --no-simd               disable AVX2/FMA SIMD acceleration
+    --simd=MODE             SIMD kernel selection: auto (default), avx2, sse42, scalar
+    --no-simd               alias for --simd=scalar
     -v, --verbose           verbose output to stderr
     -h, --help              show this help
     --list                  list available SDR interfaces
