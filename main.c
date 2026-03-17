@@ -118,6 +118,10 @@ char *soapy_args = NULL;
 char *soapy_setting_keys[SOAPY_SETTINGS_MAX];
 char *soapy_setting_vals[SOAPY_SETTINGS_MAX];
 int soapy_setting_count = 0;
+#define SOAPY_GAINS_MAX 8
+char *soapy_gain_elem_names[SOAPY_GAINS_MAX];
+double soapy_gain_elem_vals[SOAPY_GAINS_MAX];
+int soapy_gain_elem_count = 0;
 #endif
 #ifdef HAVE_SDRPLAY
 char *sdrplay_serial = NULL;

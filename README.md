@@ -656,6 +656,12 @@ Then specify the interface with `-i`. SoapySDR devices can be selected by index 
 ./iridium-sniffer -i usrp-PRODUCT-SERIAL --usrp-gain=50
 ./iridium-sniffer -i sdrplay-SERIAL --sdrplay-gain=50 -B
 
+# Per-element gain control (Airspy R2: LNA 0-15, MIX 0-15, VGA 0-15)
+./iridium-sniffer -i soapy-0 --soapy-gain-element=LNA:10 --soapy-gain-element=MIX:9 --soapy-gain-element=VGA:10
+
+# Discover available gain elements for your device
+./iridium-sniffer -i soapy-0 -v --diagnostic 2>&1 | grep "gain elements"
+
 # SoapySDR device-specific settings
 ./iridium-sniffer -i soapy:driver=airspy,serial=ABC --soapy-setting=bitpack:true
 ./iridium-sniffer -i soapy:driver=bladerf --soapy-setting=biastee_rx:true
@@ -792,10 +798,14 @@ Gain options:
     --hackrf-amp            enable HackRF RF amplifier
     --bladerf-gain=GAIN     BladeRF gain in dB (default: 40)
     --usrp-gain=GAIN        USRP gain in dB (default: 40)
-    --soapy-gain=GAIN       SoapySDR gain in dB (default: 40)
+    --soapy-gain=GAIN       SoapySDR aggregate gain in dB (default: 30)
+    --soapy-gain-element=NAME:VAL  set SoapySDR per-element gain (repeatable)
+                             e.g. LNA:10, MIX:9, VGA:10 (Airspy R2)
+                             skips aggregate --soapy-gain when any element is set
+                             use -v to list available gain elements for your device
     --soapy-setting=K:V    SoapySDR device setting (repeatable)
                              e.g. bitpack:true (Airspy), biastee_rx:true (bladeRF)
-    --sdrplay-gain=GAIN     SDRplay gain in dB, 0-59 (default: 40)
+    --sdrplay-gain=GAIN    SDRplay IF gain reduction 20-59, disables AGC (default: AGC on)
 
 Detection:
     -d, --threshold=DB      burst detection threshold in dB (default: 16.0)

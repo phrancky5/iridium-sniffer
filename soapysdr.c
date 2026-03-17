@@ -32,6 +32,11 @@ extern char *soapy_setting_keys[SOAPY_SETTINGS_MAX];
 extern char *soapy_setting_vals[SOAPY_SETTINGS_MAX];
 extern int soapy_setting_count;
 
+#define SOAPY_GAINS_MAX 8
+extern char *soapy_gain_elem_names[SOAPY_GAINS_MAX];
+extern double soapy_gain_elem_vals[SOAPY_GAINS_MAX];
+extern int soapy_gain_elem_count;
+
 static int sample_mode = 0;  /* 0=CS8, 1=CF32, 2=CS16 (fallback) */
 
 void soapy_list(void) {
@@ -131,6 +136,22 @@ SoapySDRDevice *soapy_setup(int id, const char *args) {
     if (SoapySDRDevice_setFrequency(device, SOAPY_SDR_RX, 0, center_freq, NULL) != 0)
         errx(1, "Unable to set SoapySDR frequency: %s", SoapySDRDevice_lastError());
 
+    /* List available gain elements in verbose mode */
+    if (verbose) {
+        size_t num_gains = 0;
+        char **gains = SoapySDRDevice_listGains(device, SOAPY_SDR_RX, 0, &num_gains);
+        if (gains && num_gains > 0) {
+            fprintf(stderr, "SoapySDR: available gain elements:");
+            for (size_t i = 0; i < num_gains; ++i) {
+                SoapySDRRange r = SoapySDRDevice_getGainElementRange(
+                    device, SOAPY_SDR_RX, 0, gains[i]);
+                fprintf(stderr, " %s[%.0f-%.0f]", gains[i], r.minimum, r.maximum);
+            }
+            fprintf(stderr, "\n");
+        }
+        SoapySDRStrings_clear(&gains, num_gains);
+    }
+
     /* Disable AGC for manual gain control. SDRplay devices (RSP1A, RSP2, etc.)
      * have AGC enabled by default; setting gain while AGC is active is ignored,
      * and the inconsistent state causes activateStream() to fail with
@@ -141,9 +162,24 @@ SoapySDRDevice *soapy_setup(int id, const char *args) {
             fprintf(stderr, "SoapySDR: disabled AGC for manual gain control\n");
     }
 
-    if (SoapySDRDevice_setGain(device, SOAPY_SDR_RX, 0, soapy_gain_val) != 0) {
-        if (verbose)
-            warnx("Unable to set SoapySDR gain (continuing anyway)");
+    if (soapy_gain_elem_count > 0) {
+        /* Per-element gain mode: skip aggregate setGain, set each element */
+        for (int i = 0; i < soapy_gain_elem_count; ++i) {
+            if (SoapySDRDevice_setGainElement(device, SOAPY_SDR_RX, 0,
+                    soapy_gain_elem_names[i], soapy_gain_elem_vals[i]) != 0) {
+                warnx("Unable to set SoapySDR gain element %s=%.1f",
+                      soapy_gain_elem_names[i], soapy_gain_elem_vals[i]);
+            } else if (verbose) {
+                fprintf(stderr, "SoapySDR: set gain %s=%.1f dB\n",
+                        soapy_gain_elem_names[i], soapy_gain_elem_vals[i]);
+            }
+        }
+    } else {
+        /* Aggregate gain mode */
+        if (SoapySDRDevice_setGain(device, SOAPY_SDR_RX, 0, soapy_gain_val) != 0) {
+            if (verbose)
+                warnx("Unable to set SoapySDR gain (continuing anyway)");
+        }
     }
 
     if (SoapySDRDevice_setBandwidth(device, SOAPY_SDR_RX, 0, samp_rate) != 0) {

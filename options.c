@@ -64,6 +64,10 @@ extern char *soapy_args;
 extern char *soapy_setting_keys[SOAPY_SETTINGS_MAX];
 extern char *soapy_setting_vals[SOAPY_SETTINGS_MAX];
 extern int soapy_setting_count;
+#define SOAPY_GAINS_MAX 8
+extern char *soapy_gain_elem_names[SOAPY_GAINS_MAX];
+extern double soapy_gain_elem_vals[SOAPY_GAINS_MAX];
+extern int soapy_gain_elem_count;
 #endif
 #ifdef HAVE_SDRPLAY
 extern char *sdrplay_serial;
@@ -142,6 +146,10 @@ static void usage(int exitcode) {
 "    --usrp-gain=GAIN        USRP gain in dB (default: 40)\n"
 "    --soapy-gain=GAIN       SoapySDR gain in dB (default: 30)\n"
 "    --sdrplay-gain=GAIN    SDRplay IF gain reduction 20-59, disables AGC (default: AGC on)\n"
+"    --soapy-gain-element=NAME:VAL  set SoapySDR per-element gain (repeatable)\n"
+"                             e.g. LNA:10, MIX:9, VGA:10 (Airspy R2)\n"
+"                             skips aggregate --soapy-gain when any element is set\n"
+"                             use -v to list available gain elements for your device\n"
 "    --soapy-setting=K:V    SoapySDR device setting (repeatable)\n"
 "                             e.g. bitpack:true (Airspy), biastee_rx:true (bladeRF)\n"
 "\n"
@@ -256,6 +264,7 @@ void parse_options(int argc, char **argv) {
         OPT_FEED,
         OPT_STATION,
         OPT_SOAPY_SETTING,
+        OPT_SOAPY_GAIN_ELEM,
         OPT_ZMQ,
         OPT_ZMQ_SUB,
         OPT_CLOCK_SOURCE,
@@ -301,6 +310,7 @@ void parse_options(int argc, char **argv) {
         { "feed",           optional_argument, NULL, OPT_FEED },
         { "station",        required_argument, NULL, OPT_STATION },
         { "soapy-setting",  required_argument, NULL, OPT_SOAPY_SETTING },
+        { "soapy-gain-element", required_argument, NULL, OPT_SOAPY_GAIN_ELEM },
         { "zmq",            optional_argument, NULL, OPT_ZMQ },
         { "zmq-sub",        optional_argument, NULL, OPT_ZMQ_SUB },
         { "clock-source",   required_argument, NULL, OPT_CLOCK_SOURCE },
@@ -599,6 +609,31 @@ void parse_options(int argc, char **argv) {
                 }
 #else
                 errx(1, "--soapy-setting requires SoapySDR support");
+#endif
+                break;
+
+            case OPT_SOAPY_GAIN_ELEM:
+#ifdef HAVE_SOAPYSDR
+                if (soapy_gain_elem_count >= SOAPY_GAINS_MAX)
+                    errx(1, "Too many --soapy-gain-element options (max %d)",
+                         SOAPY_GAINS_MAX);
+                {
+                    char *colon = strchr(optarg, ':');
+                    if (!colon)
+                        errx(1, "--soapy-gain-element requires NAME:VALUE "
+                             "(e.g. LNA:10)");
+                    *colon = '\0';
+                    char *endptr;
+                    double val = strtod(colon + 1, &endptr);
+                    if (endptr == colon + 1 || *endptr != '\0')
+                        errx(1, "--soapy-gain-element invalid value for '%s': %s",
+                             optarg, colon + 1);
+                    soapy_gain_elem_names[soapy_gain_elem_count] = strdup(optarg);
+                    soapy_gain_elem_vals[soapy_gain_elem_count] = val;
+                    soapy_gain_elem_count++;
+                }
+#else
+                errx(1, "--soapy-gain-element requires SoapySDR support");
 #endif
                 break;
 
