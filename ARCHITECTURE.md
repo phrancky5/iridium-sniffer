@@ -5,14 +5,15 @@ Standalone Iridium satellite burst detector and demodulator. Replaces gr-iridium
 ## High-Level Pipeline
 
 ```
-SDR / IQ File
+SDR / IQ File / ZMQ SUB / VITA 49
      |
-     v  (int8 IQ pairs)
+     v  (int8/int16/float IQ pairs)
 [Burst Detector]     -- single thread, maintains sequential state
   |  Sliding FFT (Blackman window, 8192-point at 10 MHz)
   |  Adaptive noise floor (512-frame circular history)
   |  Peak detection + burst state machine
   |  IQ ring buffer extraction for completed bursts
+  |  Optional GPU-accelerated FFT (OpenCL or Vulkan plugin)
      |
      v  burst_queue (512 slots)
      |
@@ -24,7 +25,7 @@ SDR / IQ File
   |  Fine CFO (squared FFT + quadratic interpolation)
   |  RRC matched filter
   |  FFT-based sync word correlation (DL + UL patterns)
-  |  Phase alignment
+  |  Phase alignment + Gardner timing recovery
   |  Frame extraction
      |
      v  frame_queue (512 slots)
@@ -36,37 +37,48 @@ SDR / IQ File
   |  Dual-direction unique word verification (DL + UL, Hamming <= 2)
   |  DQPSK differential decode
   |  Symbol-to-bits mapping
-  |  RAW format output to stdout
+  |  RAW format output to stdout (or ZMQ PUB)
   |
-  +--→ [Frame Decoder]    -- inline in demod thread (when --web or --gsmtap)
-       |  Access code verification (DL/UL 24-bit patterns)
-       |  BCH(7,3) header check (IBC detection)
-       |  De-interleave: 2-way (64→2x32) and 3-way (96→3x32)
-       |  BCH(31,21) syndrome check + 2-bit error correction
-       |  IRA: sat_id, beam_id, XYZ→lat/lon/alt, paging TMSIs
-       |  IBC: sat_id, beam_id, timeslot, Iridium time counter
+  +--→ [Frame Decoder]    -- inline in demod thread (when --web, --gsmtap, --acars)
+  |    |  Access code verification (DL/UL 24-bit patterns)
+  |    |  BCH(7,3) header check (IBC detection)
+  |    |  De-interleave: 2-way (64→2x32) and 3-way (96→3x32)
+  |    |  BCH(31,21) syndrome check + 2-bit error correction
+  |    |  IRA: sat_id, beam_id, XYZ→lat/lon/alt, paging TMSIs
+  |    |  IBC: sat_id, beam_id, timeslot, Iridium time counter
+  |    |
+  |    +--→ [Web Map Server]   -- background thread (when --web)
+  |    |    |  HTTP server on configurable port (default 8888)
+  |    |    |  SSE stream at 1 Hz with JSON state snapshots
+  |    |    |  Embedded Leaflet.js + OpenStreetMap map page
+  |    |    |  Mutex-protected shared state (RA circular buffer, sat list)
+  |    |
+  |    +--→ [Doppler Solver]   -- inline (when --position)
+  |         |  Iterated weighted least-squares from IBC/IRA frequency offsets
+  |         |  Height aiding, motion-validated clustering, 3-sigma rejection
+  |
+  +--→ [IDA Decoder]     -- inline in demod thread (when --parsed, --gsmtap, --acars)
+       |  LCW extraction (46-bit permutation + 3 BCH components)
+       |  FT==2 → IDA frame confirmed
+       |  Chase BCH soft-decision decoding (LLR-guided bit flipping, --chase)
+       |  Payload descramble: 124-bit blocks, de-interleave, BCH(31,20)
+       |  CRC-CCITT verification
+       |  Multi-burst reassembly (16 slots, freq/time/seq matching)
        |
-       +--→ [Web Map Server]   -- background thread (when --web)
-       |    |  HTTP server on configurable port (default 8888)
-       |    |  SSE stream at 1 Hz with JSON state snapshots
-       |    |  Embedded Leaflet.js + OpenStreetMap map page
-       |    |  Mutex-protected shared state (RA circular buffer, sat list)
+       +--→ [Parsed Output]  -- stdout IDA: lines (when --parsed)
+       |    |  iridium-parser.py compatible format
        |
-       +--→ [IDA Decoder]     -- inline in demod thread (when --parsed, --gsmtap)
-            |  LCW extraction (46-bit permutation + 3 BCH components)
-            |  FT==2 → IDA frame confirmed
-            |  Chase BCH soft-decision decoding (LLR-guided bit flipping)
-            |  Payload descramble: 124-bit blocks, de-interleave, BCH(31,20)
-            |  CRC-CCITT verification
-            |  Multi-burst reassembly (16 slots, freq/time/seq matching)
-            |
-            +--→ [Parsed Output]  -- stdout IDA: lines (when --parsed)
-            |    |  iridium-parser.py compatible format
-            |    |  Currently IDA frames only (IRA/IBC/VOC pass as RAW)
-            |
-            +--→ [GSMTAP Output]  -- UDP to Wireshark (default 127.0.0.1:4729)
-                 |  16-byte GSMTAP header + LAPDm payload
-                 |  Channel number from Iridium L-band frequency
+       +--→ [GSMTAP Output]  -- UDP to Wireshark (default 127.0.0.1:4729)
+       |    |  16-byte GSMTAP header + LAPDm payload
+       |    |  Channel number from Iridium L-band frequency
+       |
+       +--→ [SBD/ACARS Decoder]  -- inline (when --acars)
+            |  SBD packet extraction from reassembled IDA payloads
+            |  Multi-packet SBD reassembly
+            |  ACARS message parsing (libacars-2 for ARINC-622/ADS-C/CPDLC)
+            |  Terminal output (plain text or JSON)
+            |  UDP/TCP feed output (--feed, repeatable, max 4 endpoints)
+            |  UDP streaming (--acars-udp, dumpvdl2 envelope format)
      |
 [Stats Thread]       -- 1 Hz to stderr, gr-iridium compatible format
 ```
@@ -75,36 +87,43 @@ SDR / IQ File
 
 | File | Purpose | Lines | Origin |
 |------|---------|-------|--------|
-| `main.c` | Entry point, threading, signal handling | ~450 | New |
-| `options.c` | CLI argument parsing, format auto-detection from extension | ~180 | New |
-| `iridium.h` | Protocol constants (25 ksps, UW patterns, frame limits) | ~50 | New |
-| `burst_detect.c/h` | FFT burst detector | ~750 | Port of gr-iridium `fft_burst_tagger_impl.cc` |
-| `burst_downmix.c/h` | Per-burst downmix pipeline | ~800 | Port of gr-iridium `burst_downmix_impl.cc` |
-| `qpsk_demod.c/h` | QPSK/DQPSK demodulator | ~250 | Port of gr-iridium `iridium_qpsk_demod_impl.cc` |
-| `frame_output.c/h` | RAW + parsed IDA format printer | ~260 | Port of gr-iridium `iridium_frame_printer_impl.cc` + new |
-| `frame_decode.c/h` | Iridium frame decoder (BCH, de-interleave, IRA/IBC) | ~450 | New (based on iridium-toolkit bitsparser.py) |
-| `ida_decode.c/h` | IDA frame decoder (LCW, descramble, BCH, reassembly) | ~450 | New (based on iridium-toolkit bitsparser.py + ida.py) |
-| `gsmtap.c/h` | GSMTAP/LAPDm UDP output for Wireshark | ~100 | New |
-| `web_map.c/h` | Built-in web map (HTTP server, SSE, Leaflet.js) | ~470 | New |
-| `fir_filter.c/h` | FIR filter + tap generation (RRC, RC, LPF) | ~180 | New (replaces GR kernels) |
-| `simd_kernels.h` | SIMD dispatch header, runtime CPU detection | ~150 | New (CEMAXECUTER LLC) |
-| `simd_generic.c` | Scalar fallback + dispatch initialization | ~450 | New (CEMAXECUTER LLC) |
-| `simd_avx2.c` | AVX2+FMA kernel implementations | ~650 | New (CEMAXECUTER LLC) |
-| `rotator.h` | Complex frequency rotator (inline) | ~30 | New (replaces GR rotator) |
-| `window_func.c/h` | Blackman window generation | ~20 | New |
-| `fftw_lock.h` | FFTW planner thread-safety mutex | ~25 | New |
-| `sdr.h` | SDR abstraction (sample_buf_t, push_samples) | - | Copied from ice9 |
-| `hackrf.c/h` | HackRF backend | - | Adapted from ice9 |
-| `bladerf.c/h` | BladeRF backend | - | Adapted from ice9 |
-| `usrp.c/h` | USRP/UHD backend | - | Adapted from ice9 |
-| `soapysdr.c/h` | SoapySDR backend | - | Adapted from ice9 |
+| `main.c` | Entry point, threading, FFTW wisdom, signal handling | 1122 | New |
+| `options.c` | CLI argument parsing, format auto-detection from extension | 691 | New |
+| `iridium.h` | Protocol constants (25 ksps, UW patterns, frame limits) | 54 | New |
+| `burst_detect.c/h` | FFT burst detector (adaptive noise floor, peak extraction) | 1024 | Port of gr-iridium `fft_burst_tagger_impl.cc` |
+| `burst_downmix.c/h` | Per-burst downmix pipeline (CFO, LPF, RRC, correlation) | 836 | Port of gr-iridium `burst_downmix_impl.cc` |
+| `qpsk_demod.c/h` | QPSK/DQPSK demodulator (PLL, Gardner timing recovery) | 538 | Port of gr-iridium `iridium_qpsk_demod_impl.cc` |
+| `frame_output.c/h` | RAW + parsed IDA format printer (ZMQ PUB output) | 362 | Port of gr-iridium `iridium_frame_printer_impl.cc` + new |
+| `frame_decode.c/h` | Iridium frame decoder (BCH, de-interleave, IRA/IBC) | 564 | New (based on iridium-toolkit bitsparser.py) |
+| `ida_decode.c/h` | IDA frame decoder (LCW, Chase BCH, descramble, reassembly) | 751 | New (based on iridium-toolkit bitsparser.py + ida.py) |
+| `sbd_acars.c/h` | SBD/ACARS decoder (libacars-2, feed output, UDP streaming) | 1488 | New (CEMAXECUTER LLC) |
+| `doppler_pos.c/h` | Doppler position solver (IWLS, height aiding, clustering) | 1339 | New (CEMAXECUTER LLC) |
+| `gsmtap.c/h` | GSMTAP/LAPDm UDP output for Wireshark | 103 | New |
+| `web_map.c/h` | Built-in web map (HTTP server, SSE, Leaflet.js) | 1185 | New |
+| `fir_filter.c/h` | FIR filter + tap generation (RRC, RC, LPF) | 193 | New (replaces GR kernels) |
+| `simd_kernels.h` | SIMD dispatch header, mode enum, runtime CPU detection | 193 | New (CEMAXECUTER LLC) |
+| `simd_generic.c` | Scalar fallback + three-tier dispatch initialization | 223 | New (CEMAXECUTER LLC) |
+| `simd_avx2.c` | AVX2+FMA kernel implementations (256-bit, 8 floats) | 388 | New (CEMAXECUTER LLC) |
+| `simd_sse42.c` | SSE4.2 kernel implementations (128-bit, 4 floats) | 372 | New (CEMAXECUTER LLC) |
+| `vita49.c/h` | VITA 49 (VRT) UDP input for IQ samples | 423 | New (CEMAXECUTER LLC) |
+| `sdrplay.c/h` | SDRplay RSP backend (native API 3.x) | 433 | New (CEMAXECUTER LLC) |
+| `rotator.h` | Complex frequency rotator (inline) | 48 | New (replaces GR rotator) |
+| `window_func.c/h` | Blackman window generation | 24 | New |
+| `wgs84.h` | WGS84 ellipsoid constants (for Doppler solver) | - | New |
+| `net_util.h` | Network utility (hostname resolution, endpoint parsing) | - | New |
+| `fftw_lock.h` | FFTW planner thread-safety mutex | 34 | New |
+| `sdr.h` | SDR abstraction (sample_buf_t, push_samples) | 27 | Copied from ice9 |
+| `hackrf.c/h` | HackRF backend | 88 | Adapted from ice9 |
+| `bladerf.c/h` | BladeRF backend | 174 | Adapted from ice9 |
+| `usrp.c/h` | USRP/UHD backend | 258 | Adapted from ice9 |
+| `soapysdr.c/h` | SoapySDR backend | 392 | Adapted from ice9 |
 | `opencl/burst_fft.h` | GPU FFT interface (backend-agnostic, guarded by `USE_GPU`) | ~40 | Adapted from ice9 |
 | `opencl/burst_fft.c` | OpenCL + VkFFT backend (GPU kernels for window/magnitude) | ~360 | Adapted from ice9 `opencl/fft.c` |
 | `vulkan/burst_fft.c` | Vulkan + VkFFT backend (CPU window/magnitude, GPU FFT only) | ~300 | New |
 | `vkfft/vkFFT.h` | VkFFT library (header-only FFT) | - | Copied from ice9 |
-| `blocking_queue.h` | Lock-free blocking queue | - | Copied from ice9 |
-| `fair_lock.h` | Fair reader-writer lock | - | Copied from ice9 |
-| `pthread_barrier.h` | macOS pthread_barrier shim | - | Copied from ice9 |
+| `blocking_queue.h` | Lock-free blocking queue | 556 | Copied from ice9 |
+| `fair_lock.h` | Fair reader-writer lock | 292 | Copied from ice9 |
+| `pthread_barrier.h` | macOS pthread_barrier shim | 81 | Copied from ice9 |
 
 ## Key Parameters (at 10 MHz sample rate)
 
@@ -153,7 +172,7 @@ cmake ..
 make -j$(nproc)
 ```
 
-Dependencies: cmake >= 3.9, FFTW3 (float), pthreads, at least one SDR library for live capture (hackrf, bladerf, uhd, soapysdr). Optional: OpenCL or Vulkan for GPU-accelerated burst detection (see GPU Backends below).
+Dependencies: cmake >= 3.9, FFTW3 (float), pthreads, at least one SDR library for live capture (hackrf, bladerf, uhd, soapysdr, sdrplay). Optional: libzmq3-dev for ZMQ PUB/SUB output, libacars-2 for ARINC-622/ADS-C/CPDLC decoding, OpenCL or Vulkan for GPU-accelerated burst detection (see GPU Backends below).
 
 ## GPU Backends
 
@@ -239,6 +258,7 @@ All three produce equivalent RAW output (2500-2577 lines). Minor variations are 
 - [x] Phase 12: GSMTAP output (IDA decode, LCW extraction, multi-burst reassembly, Wireshark)
 - [x] Phase 13: SIMD optimization (AVX2+FMA kernels, 1.78x CPU speedup)
 - [x] Phase 14: Detection threshold optimization (18 dB → 16 dB, +6.6% valid frames)
+- [x] Phase 15: SSE4.2 SIMD tier (three-tier dispatch: AVX2 > SSE4.2 > scalar, `--simd=MODE`)
 
 ## Test Verification
 
@@ -627,17 +647,28 @@ GSMTAP (`gsmtap.c`) wraps reassembled IDA payloads in a 16-byte GSMTAP header an
 
 Wireshark correctly decodes the packets as GSM/LAPDm signaling, showing Immediate Assignment, Location Update Reject, Paging Request, and other message types.
 
-## SIMD Optimization (AVX2+FMA)
+## SIMD Optimization
 
 ### Motivation
 
 Profiling the CPU-intensive DSP pipeline revealed that FIR filtering, magnitude computation, and data conversion consumed 50-70% of total CPU time. All hot paths used scalar C loops with no SIMD vectorization. gr-iridium uses VOLK for some operations, but custom inner loops remain scalar.
 
-### Approach
+### Three-Tier Dispatch
 
-**Runtime CPU detection** -- One binary works on all x86_64 CPUs. At startup, `__builtin_cpu_supports("avx2")` selects either AVX2 or scalar implementations via function pointers. `--no-simd` flag forces scalar path for verification.
+One binary works on all x86_64 CPUs. At startup, `simd_init(simd_mode)` probes CPU capabilities via `__builtin_cpu_supports()` and selects the highest available tier via function pointers:
 
-**11 SIMD kernels implemented:**
+| Tier | ISA | Register Width | Floats/Op | Minimum CPU | Speedup |
+|------|-----|---------------|-----------|-------------|---------|
+| AVX2+FMA | AVX2, FMA3 | 256-bit | 8 | Intel Haswell (2013) / AMD Excavator (2015) | ~1.9x |
+| SSE4.2 | SSE4.2 | 128-bit | 4 | Intel Nehalem (2008) / AMD Bulldozer (2011) | ~1.3-1.5x |
+| Scalar | C99 | N/A | 1 | Any x86_64 | 1.0x |
+
+The `--simd=MODE` flag overrides auto-detection (`auto`, `avx2`, `sse42`, `scalar`). If a forced mode is unavailable, dispatch falls back to the next available tier with a warning on stderr. `--no-simd` is retained as an alias for `--simd=scalar`.
+
+### 11 SIMD Kernels
+
+All 11 kernels are implemented identically across all three tiers:
+
 1. `simd_fir_ccf()` -- Complex FIR (51-tap RRC, 25-tap noise LPF)
 2. `simd_fir_ccf_dec()` -- FIR with decimation (200-tap input LPF)
 3. `simd_fir_fff()` -- Real FIR (start-detection magnitude smoothing)
@@ -650,7 +681,8 @@ Profiling the CPU-intensive DSP pipeline revealed that FIR filtering, magnitude 
 10. `simd_max_float()` -- Horizontal max (peak search)
 11. `simd_csquare_window()` -- Complex squaring with window (fine CFO)
 
-**AVX2 implementation details:**
+### AVX2 Implementation Details
+
 - Compiled with `-mavx2 -mfma` in separate translation unit (CMake `set_source_files_properties`)
 - 32-byte aligned memory via `posix_memalign` for all working buffers
 - FIR taps zero-padded to multiple of 8 floats for unrolled loops
@@ -658,9 +690,19 @@ Profiling the CPU-intensive DSP pipeline revealed that FIR filtering, magnitude 
 - Horizontal reductions via `_mm256_permutevar8x32_ps` + `_mm256_hadd_ps`
 - Tail handling for non-multiple-of-N lengths (scalar loop for remainder)
 
-**Scalar fallback:**
+### SSE4.2 Implementation Details
+
+- Compiled with `-msse4.2` in separate translation unit
+- Uses `__m128` (4 floats / 2 complex samples) instead of `__m256` (8 floats / 4 complex)
+- Complex deinterleave via `_mm_shuffle_ps` instead of `_mm256_permutevar8x32_ps`
+- 2-float results written via `_mm_store_sd` (magnitude computations)
+- No FMA -- uses separate multiply and add (`_mm_mul_ps` + `_mm_add_ps`)
+- Same tail-handling strategy as AVX2 (scalar loop for remainder elements)
+
+### Scalar Fallback
+
 - Functions in `simd_generic.c` are byte-for-byte identical to original inline loops
-- Zero performance regression -- verified 29.0s baseline → 29.2s with `--no-simd`
+- Zero performance regression -- verified 29.0s baseline → 29.2s with `--simd=scalar`
 
 ### Results
 
@@ -673,45 +715,28 @@ Profiling the CPU-intensive DSP pipeline revealed that FIR filtering, magnitude 
 | Scalar + GPU | 42.6s | 16.1s | 1.0x | 3228 | c09b29ce... |
 | Scalar only | 40.6s | 13.0s | 1.0x | 3228 | 510e8cc9... |
 
-AVX2 vs scalar produces identical decoded bits (same frames, same demodulated data). GPU vs CPU may differ by a few frames due to burst detection FFT rounding, hence two MD5 groups.
+All three SIMD tiers produce identical decoded bits (same frames, same demodulated data). Verified on 535 decoded frames from a 5-minute RTL-SDR recording: 0 bit differences across AVX2, SSE4.2, and scalar paths. GPU vs CPU may differ by a few frames due to burst detection FFT rounding, hence two MD5 groups.
 
 **Verification:**
-- AVX2 and scalar produce identical output within each GPU group
+- AVX2, SSE4.2, and scalar produce identical output within each GPU group
 - 60s file processed in 12-15s = 4-5x realtime
 - CPU time reduced 47% with AVX2 (40.6s -> 21.5s) at identical decode quality
 - GPU adds ~3s startup overhead for OpenCL init; not beneficial at 10 MHz on fast x86
 
-### Files Modified
-
-| File | Change |
-|------|--------|
-| `simd_kernels.h` (NEW) | Function pointer typedefs, aligned allocators, dispatch declarations |
-| `simd_generic.c` (NEW) | Scalar implementations + `simd_init()` runtime dispatch |
-| `simd_avx2.c` (NEW) | AVX2+FMA intrinsics for all 11 kernels |
-| `CMakeLists.txt` | Add simd sources, compile `simd_avx2.c` with `-mavx2 -mfma` |
-| `main.c` | Call `simd_init(no_simd)` at startup |
-| `options.c` | Add `--no-simd` flag |
-| `fir_filter.c` | Replace inline loops with `simd_fir_*()` calls, aligned tap allocation |
-| `burst_detect.c` | Replace 5 inline loops with SIMD calls, aligned allocations |
-| `burst_downmix.c` | Replace 3 inline loops with SIMD calls, aligned work buffers |
-| `.gitignore` | Add `test-data/` (4.5 GB test file, not committed) |
-| `examples/*.sh` | Fix `./iridium-sniffer` → `iridium-sniffer` (works when installed) |
-
 ### Architecture Notes
 
-**Binary portability:** The AVX2 code path is in a separate `.c` file compiled with architecture flags. The rest of the binary uses default `-march` (typically x86-64-v2 or generic). Runtime detection ensures one binary works on all CPUs from Haswell (2013, AVX2) to current without recompilation.
+**Binary portability:** Each SIMD tier is in a separate `.c` file compiled with ISA-specific flags (`-mavx2 -mfma`, `-msse4.2`). The rest of the binary uses default `-march` (typically x86-64-v2 or generic). Runtime detection ensures one binary works on all x86_64 CPUs without recompilation.
 
-**Cache efficiency:** 32-byte alignment satisfies AVX2 load/store requirements and matches x86 cache line size (64 bytes = 2 AVX2 vectors). Aligned loads avoid unaligned access penalties (~3 cycle stall on older µarchs).
+**Cache efficiency:** 32-byte alignment satisfies AVX2 load/store requirements and matches x86 cache line size (64 bytes = 2 AVX2 vectors). Aligned loads avoid unaligned access penalties (~3 cycle stall on older microarchitectures).
 
-**FMA advantage:** `a * b + c` compiled as separate `vmulps` + `vaddps` rounds twice. `vfmadd231ps` fuses the operation and rounds once, improving both speed (1 µop vs 2) and numerical accuracy (one rounding error instead of two).
+**FMA advantage:** `a * b + c` compiled as separate `vmulps` + `vaddps` rounds twice. `vfmadd231ps` fuses the operation and rounds once, improving both speed (1 micro-op vs 2) and numerical accuracy (one rounding error instead of two). Only available in the AVX2 tier.
 
-**Why not VOLK?** VOLK is a heavy dependency (5000+ lines, build system integration). These 11 kernels are ~650 lines of intrinsics with zero external dependencies. For a standalone tool, less is more.
+**Why not VOLK?** VOLK is a heavy dependency (5000+ lines, build system integration). These 11 kernels are ~1000 lines of intrinsics across two tiers with zero external dependencies. For a standalone tool, less is more.
 
 ### Known Limitations
 
 - **x86_64 only** -- ARM NEON path not implemented (scalar fallback works fine)
-- **AVX2 baseline** -- No SSE2/AVX1 intermediate path (diminishing returns, added complexity)
-- **No AVX-512** -- Would require separate compilation unit and detection; 2x speedup not worth doubling code size for <5% of user base
+- **No AVX-512** -- Would require separate compilation unit and detection; ~1.5-2x speedup over AVX2 not worth the maintenance burden for <5% of user base
 
 ## Detection Threshold Optimization (Phase 14)
 

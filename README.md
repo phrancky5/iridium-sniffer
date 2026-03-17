@@ -25,7 +25,7 @@ Native GSMTAP output (`--gsmtap`) sends decoded IDA (Iridium Data) frames direct
 - ZMQ PUB/SUB output (`--zmq`) for multi-consumer iridium-toolkit compatibility
 - ZMQ SUB and VITA 49 (VRT) network IQ input for remote SDR and distributed setups
 - Multi-threaded architecture: detection, downmix pool, demodulation, stats
-- HackRF, BladeRF, USRP, and SoapySDR support
+- HackRF, BladeRF, USRP, SDRplay, and SoapySDR support
 - Reads ci8, ci16, and cf32 IQ files with auto-detection from file extension
 
 ## Installation
@@ -828,8 +828,8 @@ VITA 49:
 Output:
     --file-info=STR         file info string for RAW output (default: auto)
     --parsed                output parsed IDA lines (bypass iridium-parser.py)
-    --chase[=N]             experimental Chase soft-decision BCH (default: 0, disabled)
-                             N = flip-bits 0-7, default 0 when flag is present
+    --chase[=N]             Chase soft-decision BCH decoder (experimental)
+                             N = flip-bits 0-7 (try --chase=5 for 31 combos)
     --save-bursts=DIR       save IQ samples of decoded bursts to directory
     --diagnostic            setup verification mode (suppresses RAW output)
     --no-gardner            disable Gardner timing recovery (enabled by default)
