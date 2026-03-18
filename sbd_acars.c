@@ -362,7 +362,8 @@ static void ts_do_init(void)
 
 static void ts_ensure_init(uint64_t ts_ns)
 {
-    first_ts_ns = ts_ns;   /* harmless if already set (same value) */
+    if (first_ts_ns == 0)
+        first_ts_ns = ts_ns;
     pthread_once(&ts_once, ts_do_init);
 }
 
