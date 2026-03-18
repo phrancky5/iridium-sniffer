@@ -341,12 +341,9 @@ burst_detector_t *burst_detector_create(burst_config_t *config) {
     d->index = 0;
     d->squelch_count = 0;
 
-    /* IQ ringbuffer: hold enough for max burst + pre + post + headroom */
-    d->ringbuf_size = d->max_burst_len + d->burst_pre_len + d->burst_post_len
-                      + d->fft_size * 4;
-    /* Minimum 2 seconds */
-    if (d->ringbuf_size < (size_t)(2 * d->sample_rate))
-        d->ringbuf_size = 2 * d->sample_rate;
+    /* IQ ringbuffer: hold enough for max burst + pre + post + headroom  (+25%)*/
+    size_t minimum = (size_t)d->max_burst_len + d->burst_post_len + d->burst_pre_len;
+    d->ringbuf_size = minimum + minimum / 4;   /* 1.25x minimum needed */
     d->ringbuf = malloc(sizeof(float complex) * d->ringbuf_size);
     d->ringbuf_write = 0;
     d->ringbuf_start = 0;
