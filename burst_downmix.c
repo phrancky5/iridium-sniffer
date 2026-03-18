@@ -492,8 +492,9 @@ static float estimate_fine_cfo(burst_downmix_t *dm, const float complex *frame,
     if (n > frame_len) n = frame_len;
 
     /* Square the signal (removes BPSK, creates tone at 2x CFO) */
-    memset(dm->cfo_fft_in, 0, dm->cfo_fft_total * sizeof(float complex));
     simd_csquare_window(frame, dm->cfo_window, dm->cfo_fft_in, n);
+    if (n < dm->cfo_fft_total)
+        memset(dm->cfo_fft_in + n, 0, (dm->cfo_fft_total - n) * sizeof(float complex));
 
     /* FFT */
     fftwf_execute(dm->cfo_fft_plan);
@@ -551,8 +552,10 @@ static int correlate_sync(burst_downmix_t *dm, const float complex *frame,
     if (search_len > frame_len) search_len = frame_len;
 
     /* Forward FFT of signal */
-    memset(dm->corr_fwd_in, 0, dm->corr_fft_size * sizeof(float complex));
     memcpy(dm->corr_fwd_in, frame, search_len * sizeof(float complex));
+    if (search_len < dm->corr_fft_size)
+        memset(dm->corr_fwd_in + search_len, 0,
+               (dm->corr_fft_size - search_len) * sizeof(float complex));
     fftwf_execute(dm->corr_fwd_plan);
 
     /* Frequency-domain multiply: signal_fft * sync_fft */

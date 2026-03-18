@@ -446,9 +446,17 @@ float burst_detector_peak_signal(burst_detector_t *d) {
 /* ---- Internal: ringbuffer operations ---- */
 
 static void ringbuf_write(burst_detector_t *d, const float complex *samples, size_t n) {
-    for (size_t i = 0; i < n; i++) {
-        d->ringbuf[d->ringbuf_write] = samples[i];
-        d->ringbuf_write = (d->ringbuf_write + 1) % d->ringbuf_size;
+    size_t pos = d->ringbuf_write;
+    if (pos + n <= d->ringbuf_size) {
+        memcpy(&d->ringbuf[pos], samples, n * sizeof(float complex));
+        d->ringbuf_write = pos + n;
+        if (d->ringbuf_write == d->ringbuf_size)
+            d->ringbuf_write = 0;
+    } else {
+        size_t first = d->ringbuf_size - pos;
+        memcpy(&d->ringbuf[pos], samples, first * sizeof(float complex));
+        memcpy(d->ringbuf, samples + first, (n - first) * sizeof(float complex));
+        d->ringbuf_write = n - first;
     }
     /* Update the oldest available sample index */
     uint64_t total_written = d->sample_count;
@@ -470,9 +478,12 @@ static float complex *ringbuf_extract(burst_detector_t *d, uint64_t start,
     float complex *buf = malloc(sizeof(float complex) * len);
     size_t rb_pos = (size_t)(start % d->ringbuf_size);
 
-    for (size_t i = 0; i < len; i++) {
-        buf[i] = d->ringbuf[rb_pos];
-        rb_pos = (rb_pos + 1) % d->ringbuf_size;
+    if (rb_pos + len <= d->ringbuf_size) {
+        memcpy(buf, &d->ringbuf[rb_pos], len * sizeof(float complex));
+    } else {
+        size_t first = d->ringbuf_size - rb_pos;
+        memcpy(buf, &d->ringbuf[rb_pos], first * sizeof(float complex));
+        memcpy(buf + first, d->ringbuf, (len - first) * sizeof(float complex));
     }
 
     *out_len = len;

@@ -46,6 +46,34 @@ extern int use_chase;
 /* DQPSK transition table: maps (new - old) % 4 -> decoded symbol */
 static const int dqpsk_map[] = { 0, 2, 3, 1 };
 
+/* ---- Reusable working buffers (avoid per-frame malloc) ---- */
+/* Grow-on-demand, never shrink. Thread-local for safe parallel use. */
+static __thread float complex *work_decimated = NULL;
+static __thread float complex *work_pll_out   = NULL;
+static __thread int           *work_symbols   = NULL;
+static __thread float         *work_offsets   = NULL;
+static __thread float         *work_magnitudes = NULL;
+static __thread int            work_capacity  = 0;
+
+static int ensure_work_buffers(int max_symbols) {
+    if (max_symbols <= work_capacity)
+        return 1;
+    int cap = max_symbols + 256;  /* small headroom to avoid frequent realloc */
+    float complex *d = realloc(work_decimated, cap * sizeof(float complex));
+    float complex *p = realloc(work_pll_out,   cap * sizeof(float complex));
+    int           *s = realloc(work_symbols,   cap * sizeof(int));
+    float         *o = realloc(work_offsets,   cap * sizeof(float));
+    float         *m = realloc(work_magnitudes, cap * sizeof(float));
+    if (!d || !p || !s || !o || !m) return 0;
+    work_decimated  = d;
+    work_pll_out    = p;
+    work_symbols    = s;
+    work_offsets    = o;
+    work_magnitudes = m;
+    work_capacity   = cap;
+    return 1;
+}
+
 /* Gardner TED loop filter gains.
  * Bn*Ts ~= 0.01 (1% of symbol rate) for moderate convergence speed.
  * Kp (proportional) and Ki (integral) derived from standard 2nd-order loop. */
@@ -203,8 +231,8 @@ static int demod_qpsk(const float complex *burst, int n_symbols,
     float max_mag = 0;
     int low_count = 0;
     int n = 0;
-    float *offsets = malloc(n_symbols * sizeof(float));
-    float *magnitudes = malloc(n_symbols * sizeof(float));
+    float *offsets = work_offsets;
+    float *magnitudes = work_magnitudes;
 
     for (int i = 0; i < n_symbols; i++) {
         float re = crealf(burst[i]);
@@ -255,8 +283,6 @@ static int demod_qpsk(const float complex *burst, int n_symbols,
     *level_out = n > 0 ? sum / n : 0;
     *confidence_out = n > 0 ? (100 * n_ok) / n : 0;
 
-    free(offsets);
-    free(magnitudes);
     return n;
 }
 
@@ -397,16 +423,11 @@ int qpsk_demod(downmix_frame_t *in, demod_frame_t **out)
     if (sps < 1) sps = 1;
 
     int max_symbols = (int)in->num_samples / sps + 1;
-    float complex *decimated = malloc(max_symbols * sizeof(float complex));
-    float complex *pll_out   = malloc(max_symbols * sizeof(float complex));
-    int *symbols             = malloc(max_symbols * sizeof(int));
-
-    if (!decimated || !pll_out || !symbols) {
-        free(decimated);
-        free(pll_out);
-        free(symbols);
+    if (!ensure_work_buffers(max_symbols))
         return 0;
-    }
+    float complex *decimated = work_decimated;
+    float complex *pll_out   = work_pll_out;
+    int *symbols             = work_symbols;
 
     /* Step 1: Decimate to 1 sample per symbol */
     int n_symbols;
@@ -445,9 +466,6 @@ int qpsk_demod(downmix_frame_t *in, demod_frame_t **out)
                     in->direction = DIR_UNDEF;
                     save_burst_iq(in, save_bursts_dir);
                 }
-                free(decimated);
-                free(pll_out);
-                free(symbols);
                 return 0;
             }
 
@@ -476,12 +494,8 @@ int qpsk_demod(downmix_frame_t *in, demod_frame_t **out)
     /* Step 6: Map to bits */
     int n_bits = actual_symbols * 2;
     uint8_t *bits = malloc(n_bits);
-    if (!bits) {
-        free(decimated);
-        free(pll_out);
-        free(symbols);
+    if (!bits)
         return 0;
-    }
     map_symbols_to_bits(symbols, actual_symbols, bits);
 
     /* Step 7: Compute per-bit soft reliability (LLR magnitude) from PLL output.
@@ -530,9 +544,5 @@ int qpsk_demod(downmix_frame_t *in, demod_frame_t **out)
     }
 
     *out = frame;
-
-    free(decimated);
-    free(pll_out);
-    free(symbols);
     return 1;
 }
