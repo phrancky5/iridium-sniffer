@@ -1,0 +1,155 @@
+PS F:\HAMAPPS\iridium-sniffer-master\iridium-sniffer-master> wsl -e bash -c "cd /mnt/f/HAMAPPS/iridium-sniffer-master/iridium-sniffer-master && chmod +x build-wsl.sh && ./build-wsl.sh"
+
+============================================
+  iridium-sniffer — WSL Standalone Build
+============================================
+
+[INFO]  Installing build dependencies (headers + tools only)...
+[INFO]  This will NOT modify existing SDR runtime libraries.
+
+[sudo] password for nx:
+Reading package lists... Done
+Building dependency tree... Done
+Reading state information... Done
+build-essential is already the newest version (12.10ubuntu1).
+cmake is already the newest version (3.28.3-1build7).
+pkg-config is already the newest version (1.8.1-2build1).
+libfftw3-dev is already the newest version (3.3.10-1ubuntu3).
+The following packages were automatically installed and are no longer required:
+  libgl1-amber-dri libglapi-mesa libllvm19 libosmosdr0 soapyosmo-common0.8 soapysdr0.8-module-mirisdr soapysdr0.8-module-osmosdr
+  soapysdr0.8-module-rfspace
+Use 'sudo apt autoremove' to remove them.
+0 upgraded, 0 newly installed, 0 to remove and 256 not upgraded.
+[INFO]  Installing SDR dev packages: libhackrf-dev libbladerf-dev libuhd-dev libsoapysdr-dev
+Reading package lists... Done
+Building dependency tree... Done
+Reading state information... Done
+libhackrf-dev is already the newest version (2023.01.1-9build1).
+libbladerf-dev is already the newest version (0.2023.02-4build1).
+libsoapysdr-dev is already the newest version (0.8.1-4build1).
+The following packages were automatically installed and are no longer required:
+  libgl1-amber-dri libglapi-mesa libllvm19 libosmosdr0 soapyosmo-common0.8 soapysdr0.8-module-mirisdr soapysdr0.8-module-osmosdr
+  soapysdr0.8-module-rfspace
+Use 'sudo apt autoremove' to remove them.
+Suggested packages:
+  uhd-doc
+The following NEW packages will be installed:
+  libuhd-dev
+0 upgraded, 1 newly installed, 0 to remove and 256 not upgraded.
+Need to get 167 kB of archives.
+After this operation, 1144 kB of additional disk space will be used.
+Get:1 http://archive.ubuntu.com/ubuntu noble-updates/universe amd64 libuhd-dev amd64 4.6.0.0+ds1-5.1ubuntu0.24.04.1 [167 kB]
+Fetched 167 kB in 0s (338 kB/s)   
+Selecting previously unselected package libuhd-dev:amd64.
+(Reading database ... 383222 files and directories currently installed.)
+Preparing to unpack .../libuhd-dev_4.6.0.0+ds1-5.1ubuntu0.24.04.1_amd64.deb ...
+Unpacking libuhd-dev:amd64 (4.6.0.0+ds1-5.1ubuntu0.24.04.1) ...
+Setting up libuhd-dev:amd64 (4.6.0.0+ds1-5.1ubuntu0.24.04.1) ...
+[INFO]  Installing ZMQ support...
+Reading package lists... Done
+Building dependency tree... Done
+Reading state information... Done
+libzmq3-dev is already the newest version (4.3.5-1build2).
+The following packages were automatically installed and are no longer required:
+  libgl1-amber-dri libglapi-mesa libllvm19 libosmosdr0 soapyosmo-common0.8 soapysdr0.8-module-mirisdr soapysdr0.8-module-osmosdr
+  soapysdr0.8-module-rfspace
+Use 'sudo apt autoremove' to remove them.
+0 upgraded, 0 newly installed, 0 to remove and 256 not upgraded.
+
+[OK]    Dependencies installed.
+[INFO]  Configuring build in /mnt/f/HAMAPPS/iridium-sniffer-master/iridium-sniffer-master/build...
+-- The C compiler identification is GNU 13.3.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE
+-- Found PkgConfig: /usr/bin/pkg-config (found version "1.8.1") 
+-- Found FFTW: /usr/include   
+-- Found HackRF: /usr/local/lib/libhackrf.so  
+-- Found BladeRF: /usr/lib/x86_64-linux-gnu/libbladeRF.so  
+-- Found bladeRF: /usr/lib/x86_64-linux-gnu/libbladeRF.so
+-- Found UHD: /usr/lib/x86_64-linux-gnu/libuhd.so  
+-- Found UHD: /usr/lib/x86_64-linux-gnu/libuhd.so
+-- Found SoapySDR: /usr/local/lib/libSoapySDR.so  
+-- Found SoapySDR: /usr/local/lib/libSoapySDR.so
+-- Could NOT find SDRplay (missing: SDRPLAY_LIBRARY SDRPLAY_INCLUDE_DIR) 
+-- SIMD: SSE4.2 + AVX2 kernels enabled (runtime-detected)
+-- HackRF: enabled
+-- BladeRF: enabled
+-- USRP (UHD): enabled
+-- SoapySDR: enabled
+-- libacars: enabled (ARINC-622/ADS-C/CPDLC decoding)
+-- ZMQ: enabled (multi-consumer PUB/SUB output)
+-- GPU acceleration: disabled (no plugin built)
+-- Configuring done (12.7s)
+-- Generating done (0.1s)
+-- Build files have been written to: /mnt/f/HAMAPPS/iridium-sniffer-master/iridium-sniffer-master/build
+
+[OK]    CMake configuration complete.
+[INFO]  Building with 16 parallel jobs...
+[  4%] Building C object CMakeFiles/iridium-sniffer.dir/main.c.o
+[ 13%] Building C object CMakeFiles/iridium-sniffer.dir/options.c.o
+[ 13%] Building C object CMakeFiles/iridium-sniffer.dir/burst_detect.c.o
+[ 26%] Building C object CMakeFiles/iridium-sniffer.dir/burst_downmix.c.o
+[ 26%] Building C object CMakeFiles/iridium-sniffer.dir/qpsk_demod.c.o
+[ 39%] Building C object CMakeFiles/iridium-sniffer.dir/frame_decode.c.o
+[ 52%] Building C object CMakeFiles/iridium-sniffer.dir/web_map.c.o
+[ 60%] Building C object CMakeFiles/iridium-sniffer.dir/frame_output.c.o
+[ 65%] Building C object CMakeFiles/iridium-sniffer.dir/gsmtap.c.o
+[ 69%] Building C object CMakeFiles/iridium-sniffer.dir/sbd_acars.c.o
+[ 69%] Building C object CMakeFiles/iridium-sniffer.dir/doppler_pos.c.o
+[ 69%] Building C object CMakeFiles/iridium-sniffer.dir/window_func.c.o
+[ 69%] Building C object CMakeFiles/iridium-sniffer.dir/ida_decode.c.o
+[ 69%] Building C object CMakeFiles/iridium-sniffer.dir/fir_filter.c.o
+[ 69%] Building C object CMakeFiles/iridium-sniffer.dir/simd_generic.c.o
+[ 69%] Building C object CMakeFiles/iridium-sniffer.dir/vita49.c.o
+[ 73%] Building C object CMakeFiles/iridium-sniffer.dir/simd_sse42.c.o
+[ 78%] Building C object CMakeFiles/iridium-sniffer.dir/simd_avx2.c.o
+[ 82%] Building C object CMakeFiles/iridium-sniffer.dir/hackrf.c.o
+[ 86%] Building C object CMakeFiles/iridium-sniffer.dir/bladerf.c.o
+[ 91%] Building C object CMakeFiles/iridium-sniffer.dir/usrp.c.o
+[ 95%] Building C object CMakeFiles/iridium-sniffer.dir/soapysdr.c.o
+[100%] Linking C executable iridium-sniffer
+[100%] Built target iridium-sniffer
+
+[OK]    Build complete!
+
+============================================
+[OK]    Binary ready: /mnt/f/HAMAPPS/iridium-sniffer-master/iridium-sniffer-master/build/iridium-sniffer
+============================================
+
+[INFO]  Quick test:
+Usage: iridium-sniffer <-f FILE | -i IFACE> [options]
+Standalone Iridium satellite burst detector and demodulator.
+Outputs iridium-toolkit compatible RAW format to stdout.
+
+Input (one required):
+  ...
+
+[INFO]  Usage examples:
+  # Show help
+  /mnt/f/HAMAPPS/iridium-sniffer-master/iridium-sniffer-master/build/iridium-sniffer --help
+
+  # List available SDR devices
+  /mnt/f/HAMAPPS/iridium-sniffer-master/iridium-sniffer-master/build/iridium-sniffer --list
+
+  # Process an IQ recording
+  /mnt/f/HAMAPPS/iridium-sniffer-master/iridium-sniffer-master/build/iridium-sniffer -f recording.cf32
+
+  # Live capture (SoapySDR)
+  /mnt/f/HAMAPPS/iridium-sniffer-master/iridium-sniffer-master/build/iridium-sniffer -i soapy-0
+
+  # Live capture with web map
+  /mnt/f/HAMAPPS/iridium-sniffer-master/iridium-sniffer-master/build/iridium-sniffer -i soapy-0 --web
+
+  # Built-in ACARS decoding
+  /mnt/f/HAMAPPS/iridium-sniffer-master/iridium-sniffer-master/build/iridium-sniffer -i soapy-0 --acars
+
+[INFO]  The binary is self-contained in the build/ directory.
+[INFO]  No system-wide installation was performed.
+[INFO]  To uninstall, simply delete the build/ folder.
+PS F:\HAMAPPS\iridium-sniffer-master\iridium-sniffer-master> 

@@ -1,0 +1,1965 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>iridium-sniffer — Mission Control NXC2 Edition</title>
+
+<!-- Socket.IO from CDN -->
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+<!-- Chart.js from CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+<script>
+// Fallback: if CDN blocked (e.g. by antivirus HTTPS interception), create stub
+if (typeof Chart === 'undefined') {
+  console.warn('Chart.js CDN blocked (antivirus/firewall). Charts disabled.');
+  window.Chart = function(ctx, cfg) {
+    this.update = function() {};
+    this.data = cfg.data || { labels: [], datasets: [] };
+  };
+}
+</script>
+
+<style>
+/* ================================================================
+   MISSION CONTROL — Dark Cyber Theme
+   ================================================================ */
+
+:root {
+  --bg-primary:   #0a0e17;
+  --bg-card:      #111827;
+  --bg-card-alt:  #1a2234;
+  --bg-input:     #0d1320;
+  --border:       #1e3a5f;
+  --border-glow:  #0ea5e9;
+  --accent:       #06d6a0;
+  --accent-dim:   #059669;
+  --danger:       #ef4444;
+  --danger-dim:   #991b1b;
+  --warn:         #f59e0b;
+  --text-primary: #e2e8f0;
+  --text-dim:     #94a3b8;
+  --text-muted:   #64748b;
+  --cyan:         #22d3ee;
+  --blue:         #3b82f6;
+  --purple:       #a78bfa;
+  --orange:       #fb923c;
+  --font-mono:    'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  --font-sans:    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --radius:       8px;
+  --glow-sm:      0 0 6px rgba(6, 214, 160, 0.15);
+  --glow-md:      0 0 15px rgba(6, 214, 160, 0.10);
+  --glow-cyan:    0 0 12px rgba(34, 211, 238, 0.2);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+/* Scanline overlay */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.03) 2px,
+    rgba(0,0,0,0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ---- Header ---- */
+.header {
+  background: linear-gradient(180deg, #0f172a, var(--bg-primary));
+  border-bottom: 1px solid var(--border);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.logo-icon {
+  width: 36px;
+  height: 36px;
+  background: conic-gradient(var(--cyan), var(--accent), var(--blue), var(--cyan));
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: logo-spin 8s linear infinite;
+  box-shadow: var(--glow-cyan);
+}
+
+@keyframes logo-spin { to { transform: rotate(360deg); } }
+
+.logo-icon::after {
+  content: '';
+  width: 18px; height: 18px;
+  background: var(--bg-primary);
+  border-radius: 50%;
+}
+
+.header-title {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  background: linear-gradient(90deg, var(--cyan), var(--accent));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.header-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.status-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.status-badge.offline {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+}
+
+.status-badge.online {
+  background: rgba(6, 214, 160, 0.15);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.status-badge.online .status-dot {
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(6, 214, 160, 0.6); }
+  50%      { opacity: 0.6; box-shadow: 0 0 0 6px rgba(6, 214, 160, 0); }
+}
+
+/* ---- Layout ---- */
+.main {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 0;
+  min-height: calc(100vh - 58px);
+}
+
+/* ---- Sidebar ---- */
+.sidebar {
+  background: var(--bg-card);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.panel {
+  margin-bottom: 16px;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-icon {
+  font-size: 14px;
+  width: 22px;
+  text-align: center;
+}
+
+.panel-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--text-dim);
+}
+
+/* Forms */
+.form-group {
+  margin-bottom: 10px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.form-group input,
+.form-group select {
+  width: 100%;
+  padding: 7px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+  border-color: var(--border-glow);
+  box-shadow: var(--glow-cyan);
+}
+
+.form-group select {
+  cursor: pointer;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+/* Toggle switches */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 0;
+}
+
+.toggle-label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.toggle {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  cursor: pointer;
+}
+
+.toggle input { display: none; }
+
+.toggle-track {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.toggle input:checked + .toggle-track {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+
+.toggle-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  background: var(--text-dim);
+  border-radius: 50%;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.toggle input:checked ~ .toggle-knob {
+  transform: translateX(16px);
+  background: var(--accent);
+}
+
+/* Buttons */
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 16px;
+  border: none;
+  border-radius: var(--radius);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-start {
+  background: linear-gradient(135deg, var(--accent-dim), var(--accent));
+  color: #000;
+  box-shadow: var(--glow-sm);
+}
+
+.btn-start:hover {
+  box-shadow: var(--glow-md);
+  transform: translateY(-1px);
+}
+
+.btn-stop {
+  background: linear-gradient(135deg, var(--danger-dim), var(--danger));
+  color: #fff;
+}
+
+.btn-stop:hover {
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.3);
+}
+
+.btn-scan {
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  color: var(--cyan);
+  padding: 6px 12px;
+  font-size: 11px;
+}
+
+.btn-scan:hover {
+  border-color: var(--cyan);
+  box-shadow: var(--glow-cyan);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* ---- Content area ---- */
+.content {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Stats bar */
+.stats-bar {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 12px;
+  padding: 14px 20px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+}
+
+.stat-card {
+  text-align: center;
+  padding: 8px;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.stat-value {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.stat-value.cyan  { color: var(--cyan); }
+.stat-value.green { color: var(--accent); }
+.stat-value.orange { color: var(--orange); }
+.stat-value.blue  { color: var(--blue); }
+.stat-value.purple { color: var(--purple); }
+.stat-value.red   { color: var(--danger); }
+
+.stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* Chart area */
+.chart-area {
+  padding: 14px 20px;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border);
+  height: 200px;
+}
+
+.chart-area canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Tabs */
+.tab-bar {
+  display: flex;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  padding: 8px 20px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+
+.tab:hover { color: var(--text-dim); }
+
+.tab.active {
+  color: var(--cyan);
+  border-bottom-color: var(--cyan);
+}
+
+/* Terminal output */
+.terminal-wrap {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.terminal {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  padding: 12px 16px;
+  background: var(--bg-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.terminal::-webkit-scrollbar { width: 6px; }
+.terminal::-webkit-scrollbar-track { background: transparent; }
+.terminal::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+.line-raw {
+  color: var(--accent);
+  word-break: break-all;
+}
+
+.line-log {
+  color: var(--text-muted);
+}
+
+.line-error {
+  color: var(--danger);
+}
+
+.line-system {
+  color: var(--cyan);
+  font-style: italic;
+}
+
+.line-acars {
+  color: var(--orange);
+}
+
+.line-num {
+  display: inline-block;
+  width: 50px;
+  color: var(--text-muted);
+  opacity: 0.4;
+  user-select: none;
+}
+
+/* Command display */
+.cmd-bar {
+  padding: 8px 16px;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
+.cmd-bar .prompt { color: var(--accent); }
+
+/* ---- Responsive ---- */
+@media (max-width: 900px) {
+  .main { grid-template-columns: 1fr; }
+  .sidebar { border-right: none; border-bottom: 1px solid var(--border); }
+  .stats-bar { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* Device list items */
+.device-item {
+  padding: 6px 8px;
+  margin: 3px 0;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.device-item:hover {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+
+/* Gain sliders */
+.range-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.range-wrap input[type=range] {
+  flex: 1;
+  -webkit-appearance: none;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  outline: none;
+}
+
+.range-wrap input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--cyan);
+  cursor: pointer;
+  box-shadow: var(--glow-cyan);
+}
+
+.range-val {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--cyan);
+  min-width: 32px;
+  text-align: right;
+}
+
+/* ---- Spectrum display ---- */
+.spectrum-container {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-primary);
+  padding: 8px;
+}
+.spectrum-container canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: crosshair;
+}
+.spectrum-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 6px;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.spectrum-header span { color: var(--cyan); }
+.spec-tooltip {
+  position: absolute;
+  pointer-events: none;
+  padding: 5px 8px;
+  background: rgba(17, 24, 39, 0.95);
+  border: 1px solid var(--cyan);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--cyan);
+  white-space: nowrap;
+  z-index: 10;
+  display: none;
+}
+.spec-crosshair { pointer-events: none; }
+
+/* ---- Constellation display ---- */
+.constellation-container {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 12px;
+}
+.constellation-canvas-wrap {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.constellation-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 130px;
+}
+.const-stat {
+  text-align: center;
+  padding: 10px;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.const-stat .val {
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.const-stat .lbl {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* ---- Decoded data table ---- */
+.decoded-container {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-primary);
+  overflow-y: auto;
+  padding: 0;
+}
+.decoded-container::-webkit-scrollbar { width: 6px; }
+.decoded-container::-webkit-scrollbar-track { background: transparent; }
+.decoded-container::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.decoded-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.decoded-table th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-card);
+  color: var(--cyan);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  z-index: 1;
+}
+.decoded-table td {
+  padding: 5px 10px;
+  border-bottom: 1px solid rgba(30, 58, 95, 0.3);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.decoded-table tr:hover td {
+  background: rgba(34, 211, 238, 0.05);
+}
+.conf-high { color: var(--accent) !important; }
+.conf-mid  { color: var(--orange) !important; }
+.conf-low  { color: var(--danger) !important; }
+.decoded-table .acars-row td {
+  color: var(--orange);
+  background: rgba(251, 146, 60, 0.04);
+}
+.decoded-table .ida-row td {
+  color: var(--purple);
+  background: rgba(167, 139, 250, 0.04);
+}
+
+/* Frame type badges */
+.type-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+.type-ira  { background: rgba(34,211,238,0.2); color: var(--cyan); }
+.type-ibc  { background: rgba(59,130,246,0.2); color: var(--blue); }
+.type-ida  { background: rgba(167,139,250,0.2); color: var(--purple); }
+.type-acars { background: rgba(251,146,60,0.2); color: var(--orange); }
+
+/* Filter bar */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+.filter-bar label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.filter-bar input[type=checkbox] {
+  accent-color: var(--cyan);
+}
+.filter-bar .filter-label {
+  color: var(--text-muted);
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.filter-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+</style>
+</head>
+<body>
+
+<!-- ============================================================ HEADER -->
+<div class="header">
+  <div class="header-left">
+    <div class="logo-icon"></div>
+    <div>
+      <div class="header-title">IRIDIUM SNIFFER</div>
+      <div class="header-sub">MISSION CONTROL v1.0 — NXC2 EDITION</div>
+    </div>
+  </div>
+  <div id="statusBadge" class="status-badge offline" title="Connection status. READY = backend idle, waiting for START. RUNNING = iridium-sniffer process is active.">
+    <span class="status-dot"></span>
+    <span id="statusText">READY</span>
+  </div>
+</div>
+
+<!-- ============================================================ MAIN -->
+<div class="main">
+
+  <!-- ==================== SIDEBAR ==================== -->
+  <div class="sidebar">
+
+    <!-- Input Source -->
+    <div class="panel">
+      <div class="panel-header" title="Configure the SDR device or IQ file used as the signal source.">
+        <span class="panel-icon">&#9881;</span>
+        <span class="panel-title">Input Source</span>
+      </div>
+
+      <div class="form-group">
+        <label>Mode</label>
+        <select id="inputMode" onchange="toggleMode()" title="Live: capture from a connected SDR device in real-time. File: replay a previously recorded IQ file.">
+          <option value="live">Live SDR Capture</option>
+          <option value="file">IQ File</option>
+        </select>
+      </div>
+
+      <!-- Live mode -->
+      <div id="livePanel">
+        <div class="form-group">
+          <label>Device Type</label>
+          <select id="deviceType" onchange="toggleDeviceGains()" title="HackRF One: 10 MHz bandwidth, covers full Iridium band. RTL-SDR/SoapySDR: 2.4 MHz bandwidth, covers a single Iridium channel slice.">
+            <option value="hackrf" selected>HackRF One</option>
+            <option value="soapy">RTL-SDR / SoapySDR</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="display:flex; gap:6px;">
+          <input type="text" id="interface" placeholder="e.g. hackrf-SERIAL" value="" style="flex:1" title="Device identifier string (e.g. hackrf-0000000000000001, soapy-0). Auto-filled by SCAN.">
+          <button class="btn btn-scan" onclick="scanDevices()" title="Scan for connected SDR devices. Results appear below and auto-fill the interface field.">SCAN</button>
+        </div>
+
+        <div id="deviceList" title="List of detected SDR devices. Click a device to auto-fill the Interface field."></div>
+
+        <!-- HackRF gains (visible by default since HackRF is default device) -->
+        <div id="hackrfGains">
+          <div class="form-group">
+            <label>LNA Gain (dB)</label>
+            <div class="range-wrap">
+              <input type="range" id="hackrfLna" min="0" max="40" step="8" value="40"
+                     oninput="document.getElementById('hackrfLnaVal').textContent=this.value"
+                     title="Low Noise Amplifier gain (0–40 dB, 8 dB steps). Higher = more sensitivity but more noise. 40 dB recommended for Iridium L-band.">
+              <span class="range-val" id="hackrfLnaVal">40</span>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>VGA Gain (dB)</label>
+            <div class="range-wrap">
+              <input type="range" id="hackrfVga" min="0" max="62" step="2" value="20"
+                     oninput="document.getElementById('hackrfVgaVal').textContent=this.value"
+                     title="Variable Gain Amplifier (0–62 dB, 2 dB steps). Controls baseband gain after LNA. 16–24 dB typical for Iridium.">
+              <span class="range-val" id="hackrfVgaVal">20</span>
+            </div>
+          </div>
+          <div class="toggle-row" title="Enable HackRF's built-in 14 dB RF amplifier. Useful for weak signals but can cause ADC clipping with a good antenna. Maps to --hackrf-amp.">
+            <span class="toggle-label">RF Amplifier</span>
+            <label class="toggle"><input type="checkbox" id="hackrfAmp"><span class="toggle-track"></span><span class="toggle-knob"></span></label>
+          </div>
+        </div>
+
+        <!-- SoapySDR gain -->
+        <div id="soapyGains" style="display:none;">
+          <div class="form-group">
+            <label>Gain (dB)</label>
+            <div class="range-wrap">
+              <input type="range" id="soapyGain" min="0" max="50" step="1" value="30"
+                     oninput="document.getElementById('soapyGainVal').textContent=this.value"
+                     title="Overall SoapySDR gain (0–50 dB). For RTL-SDR, 30–40 dB is typical. Maps to --soapy-gain.">
+              <span class="range-val" id="soapyGainVal">30</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- File mode -->
+      <div id="filePanel" style="display:none;">
+        <div class="form-group">
+          <label>File Path</label>
+          <input type="text" id="filePath" placeholder="/path/to/recording.cf32" title="Absolute path to an IQ recording file on the WSL filesystem (e.g. /home/user/recording.cf32 or /mnt/c/...). Maps to -f.">
+        </div>
+        <div class="form-group">
+          <label>Format</label>
+          <select id="fileFormat" title="IQ sample format of the recording. Auto-detect works for files with standard extensions (.cf32, .ci16, .ci8). Maps to --format.">
+            <option value="auto">Auto-detect</option>
+            <option value="cf32">cf32 (complex float32)</option>
+            <option value="ci16">ci16 (complex int16)</option>
+            <option value="ci8">ci8 (complex int8)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- RF Settings -->
+    <div class="panel">
+      <div class="panel-header" title="Set tuning frequency, sample rate, detection threshold, and antenna power.">
+        <span class="panel-icon">&#9778;</span>
+        <span class="panel-title">RF Settings</span>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Center Freq (Hz)</label>
+          <input type="text" id="centerFreq" value="1622000000" title="L-band center frequency in Hz. HackRF default 1622000000 covers the full Iridium band. RTL-SDR uses 1625500000 for a 2.4 MHz slice. Maps to -c.">
+        </div>
+        <div class="form-group">
+          <label>Sample Rate (Hz)</label>
+          <input type="text" id="sampleRate" value="10000000" title="ADC sample rate in Hz. HackRF: 10000000 (10 MHz). RTL-SDR: 2400000 (2.4 MHz). Higher = more bandwidth captured. Maps to -r.">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Threshold (dB)</label>
+        <div class="range-wrap">
+          <input type="range" id="threshold" min="10" max="24" step="0.5" value="16"
+                 oninput="document.getElementById('threshVal').textContent=this.value"
+                 title="Burst detection threshold in dB above the adaptive noise floor. Lower = more bursts detected (but lower ok%). Default 16 dB. gr-iridium uses 18 dB. Maps to -d.">
+          <span class="range-val" id="threshVal">16</span>
+        </div>
+      </div>
+
+      <div class="toggle-row" title="Supply DC power over the coax to an active antenna (e.g. Iridium patch antenna with LNA). ON by default for HackRF with bias-t antenna. Maps to -B.">
+        <span class="toggle-label">Bias Tee</span>
+        <label class="toggle"><input type="checkbox" id="biasTee" checked><span class="toggle-track"></span><span class="toggle-knob"></span></label>
+      </div>
+    </div>
+
+    <!-- Demod & Processing -->
+    <div class="panel">
+      <div class="panel-header" title="SIMD acceleration, BCH error correction, symbol timing, GPU offload, and debug verbosity.">
+        <span class="panel-icon">&#9881;</span>
+        <span class="panel-title">Processing</span>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>SIMD</label>
+          <select id="simd" title="SIMD instruction set for DSP kernels. Auto selects the best available (AVX2 > SSE4.2 > Scalar). Override only for testing. Maps to --simd.">
+            <option value="auto">Auto</option>
+            <option value="avx2">AVX2</option>
+            <option value="sse42">SSE4.2</option>
+            <option value="scalar">Scalar</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Chase BCH</label>
+          <select id="chase" title="Soft-decision BCH error correction for IDA frames. Tries N bit-flip combinations to recover corrupted frames. Higher = more CPU. Recommended: 5. Maps to --chase=N.">
+            <option value="0">Off</option>
+            <option value="3">3 (7 combos)</option>
+            <option value="5">5 (31 combos)</option>
+            <option value="7">7 (127 combos)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="toggle-row" title="Gardner Timing Error Detector for symbol recovery with cubic spline interpolation. ON = better timing, OFF = simple 10x decimation fallback. Maps to --no-gardner when OFF.">
+        <span class="toggle-label">Gardner TED</span>
+        <label class="toggle"><input type="checkbox" id="gardner" checked><span class="toggle-track"></span><span class="toggle-knob"></span></label>
+      </div>
+      <div class="toggle-row" title="GPU-accelerated burst detection FFT via OpenCL. Requires libiridium-sniffer-gpu.so and an OpenCL runtime. Best for long live captures on desktop GPUs. Maps to --no-gpu when OFF.">
+        <span class="toggle-label">GPU (OpenCL)</span>
+        <label class="toggle"><input type="checkbox" id="gpu"><span class="toggle-track"></span><span class="toggle-knob"></span></label>
+      </div>
+      <div class="toggle-row" title="Print verbose diagnostic messages to stderr (visible in System Log tab). Useful for debugging gain/antenna issues. Maps to -v.">
+        <span class="toggle-label">Verbose</span>
+        <label class="toggle"><input type="checkbox" id="verbose"><span class="toggle-track"></span><span class="toggle-knob"></span></label>
+      </div>
+    </div>
+
+    <!-- Output Features -->
+    <div class="panel">
+      <div class="panel-header" title="Optional output modules: web map, ACARS decoding, Wireshark feed, IDA parsing, positioning, and ZMQ pub.">
+        <span class="panel-icon">&#9889;</span>
+        <span class="panel-title">Features</span>
+      </div>
+
+      <div class="toggle-row" title="Launch embedded Leaflet.js web map on port 8888. Shows satellite beam footprints, MT positions, ring alerts, and aircraft (with ACARS). Maps to --web=PORT.">
+        <span class="toggle-label">Web Map</span>
+        <label class="toggle"><input type="checkbox" id="webMap"><span class="toggle-track"></span><span class="toggle-knob"></span></label>
+      </div>
+      <div class="toggle-row" title="Decode SBD/ACARS payloads to human-readable text in RAW output. With libacars-2: full ARINC-622, ADS-C, CPDLC decode. Maps to --acars.">
+        <span class="toggle-label">ACARS Decode</span>
+        <label class="toggle"><input type="checkbox" id="acars"><span class="toggle-track"></span><span class="toggle-knob"></span></label>
+      </div>
+      <div class="toggle-row" title="Emit JSON-formatted ACARS in dumpvdl2/dumphfdl envelope format for ingestion by acarshub or airframes.io. Maps to --acars-json.">
+        <span class="toggle-label">ACARS JSON</span>
+        <label class="toggle"><input type="checkbox" id="acarsJson"><span class="toggle-track"></span><span class="toggle-knob"></span></label>
+      </div>
+      <div class="toggle-row" title="Send decoded IDA frames as GSMTAP/LAPDm UDP packets to Wireshark on 127.0.0.1:4729. Replaces iridium-parser.py -m gsmtap pipeline. Maps to --gsmtap.">
+        <span class="toggle-label">GSMTAP → Wireshark</span>
+        <label class="toggle"><input type="checkbox" id="gsmtap"><span class="toggle-track"></span><span class="toggle-knob"></span></label>
+      </div>
+      <div class="toggle-row" title="Decode IDA frames internally, output IDA: lines with LCW headers (maint/acchl/hndof sub-types). Enables sub-type filtering in Decoded Data tab. Maps to --parsed.">
+        <span class="toggle-label">Parsed IDA</span>
+        <label class="toggle"><input type="checkbox" id="parsed"><span class="toggle-track"></span><span class="toggle-knob"></span></label>
+      </div>
+      <div class="toggle-row" title="Estimate receiver position from Doppler frequency shifts. Needs ≥5 measurements from ≥2 satellites. Runs every 10s. Height aiding improves accuracy. Maps to --position.">
+        <span class="toggle-label">Doppler Position</span>
+        <label class="toggle"><input type="checkbox" id="position"><span class="toggle-track"></span><span class="toggle-knob"></span></label>
+      </div>
+      <div class="toggle-row" title="Publish RAW lines on ZMQ PUB socket tcp://*:7006 for multiple simultaneous iridium-toolkit consumers. Non-blocking. Maps to --zmq.">
+        <span class="toggle-label">ZMQ PUB</span>
+        <label class="toggle"><input type="checkbox" id="zmq"><span class="toggle-track"></span><span class="toggle-knob"></span></label>
+      </div>
+
+      <div class="form-group" style="margin-top:8px;">
+        <label>Station ID</label>
+        <input type="text" id="stationId" placeholder="MYSTATION" title="Custom station identifier included in output lines and ACARS feeds. Useful for multi-station setups. Maps to --station.">
+      </div>
+    </div>
+
+    <!-- Start / Stop -->
+    <div class="panel">
+      <button id="btnStart" class="btn btn-start" onclick="startSniffer()" title="Start iridium-sniffer with the configured settings. The exact command is shown in the bottom bar.">
+        &#9654; START CAPTURE
+      </button>
+      <button id="btnStop" class="btn btn-stop" onclick="stopSniffer()" style="display:none; margin-top:8px;" title="Send SIGTERM to the iridium-sniffer process. Capture stops and all queued data is flushed.">
+        &#9632; STOP
+      </button>
+    </div>
+
+  </div>
+
+  <!-- ==================== CONTENT ==================== -->
+  <div class="content">
+
+    <!-- Stats bar -->
+    <div class="stats-bar">
+      <div class="stat-card" title="Total RF bursts detected by the FFT burst detector. A burst is any signal exceeding the threshold above the noise floor.">
+        <div class="stat-value cyan" id="statBursts">0</div>
+        <div class="stat-label">Bursts</div>
+      </div>
+      <div class="stat-card" title="Total decoded RAW frames (bursts that successfully passed downmix, DQPSK demod, and unique word verification).">
+        <div class="stat-value green" id="statFrames">0</div>
+        <div class="stat-label">Frames</div>
+      </div>
+      <div class="stat-card" title="Running average of ok% — the fraction of detected bursts that decode successfully. 70%+ is good. Low ok% suggests gain or antenna issues.">
+        <div class="stat-value orange" id="statOk">0.0%</div>
+        <div class="stat-label">Ok Avg</div>
+      </div>
+      <div class="stat-card" title="SDR input rate — bursts detected per second. Depends on satellite visibility, time of day, and bandwidth.">
+        <div class="stat-value blue" id="statRate">0/s</div>
+        <div class="stat-label">Input</div>
+      </div>
+      <div class="stat-card" title="Peak downmix worker queue depth. High values mean CPU is struggling to keep up. Consider reducing sample rate or enabling GPU.">
+        <div class="stat-value purple" id="statQueue">0</div>
+        <div class="stat-label">Q Max</div>
+      </div>
+      <div class="stat-card" title="Bursts dropped because the processing queue was full. Non-zero means the CPU cannot keep up — reduce load or increase workers.">
+        <div class="stat-value red" id="statDropped">0</div>
+        <div class="stat-label">Dropped</div>
+      </div>
+    </div>
+
+    <!-- Chart -->
+    <div class="chart-area" title="Live throughput chart. Green line (left axis): decoded frames per second. Orange line (right axis): running ok avg %. Scrolling 120-second window.">
+      <canvas id="liveChart"></canvas>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tab-bar">
+      <div class="tab active" data-tab="raw" onclick="switchTab(this)" title="Live stream of every RAW line from iridium-sniffer stdout. Shows the raw demodulated output exactly as piped to iridium-toolkit.">RAW Output</div>
+      <div class="tab" data-tab="log" onclick="switchTab(this)" title="stderr output: 1 Hz stats lines, verbose diagnostics (if -v enabled), and GUI system messages (start/stop/errors).">System Log</div>
+      <div class="tab" data-tab="spectrum" onclick="switchTab(this)" title="Live RF spectrum showing detected burst activity across the tuned frequency band. Hover for details. Color = confidence, shape = frame type.">Spectrum</div>
+      <div class="tab" data-tab="constellation" onclick="switchTab(this)" title="DQPSK constellation diagram showing demodulation quality. Tight clusters = clean signal. Scatter radius reflects confidence %.">Constellation</div>
+      <div class="tab" data-tab="decoded" onclick="switchTab(this)" title="Structured table of every decoded frame with type classification, filtering, SNR, confidence, and timing. Enable Parsed IDA for sub-type detail.">Decoded Data</div>
+    </div>
+
+    <!-- Terminal panes -->
+    <div class="terminal-wrap">
+      <div class="terminal" id="termRaw"></div>
+      <div class="terminal" id="termLog" style="display:none;"></div>
+
+      <!-- Spectrum display -->
+      <div class="spectrum-container" id="tabSpectrum" style="display:none;" title="Live burst activity across the tuned bandwidth. X-axis = frequency offset from center. Y-axis = SNR dB. Hover any point for details.">
+        <div class="spectrum-header">
+          <span id="specFreqRange" title="Frequency range covered by the current sample rate, centered on the configured center frequency.">—</span>
+          <span id="specBurstCount" title="Number of burst points currently visible (fades after 60 seconds).">0 bursts</span>
+        </div>
+        <canvas id="spectrumCanvas"></canvas>
+        <div class="spec-tooltip" id="specTooltip"></div>
+      </div>
+
+      <!-- Constellation display -->
+      <div class="constellation-container" id="tabConstellation" style="display:none;">
+        <div class="constellation-canvas-wrap" title="DQPSK constellation I/Q scatter plot. 4 ideal points (00, 01, 11, 10). Scatter = noise. Green = high confidence, orange = medium, red = low.">
+          <canvas id="constellationCanvas" width="380" height="380"></canvas>
+        </div>
+        <div class="constellation-sidebar">
+          <div class="const-stat" title="Number of recent frames displayed in the constellation (max 200, oldest fade out)."><div class="val green" id="constFrames">0</div><div class="lbl">Frames</div></div>
+          <div class="const-stat" title="Average demodulation confidence across displayed frames. Higher = cleaner signal."><div class="val cyan" id="constAvgConf">—</div><div class="lbl">Avg Conf %</div></div>
+          <div class="const-stat" title="Average signal-to-noise ratio across displayed frames in dB."><div class="val orange" id="constAvgSnr">—</div><div class="lbl">Avg SNR dB</div></div>
+          <div class="const-stat" title="Highest confidence % seen among the displayed frames."><div class="val purple" id="constBestConf">—</div><div class="lbl">Best Conf %</div></div>
+          <div class="const-stat" title="Average symbol count per frame. IRA ≈ 62, IDA ≈ 179, IBC ≈ 220+."><div class="val blue" id="constSymRate">—</div><div class="lbl">Symbols</div></div>
+        </div>
+      </div>
+
+      <!-- Decoded data table -->
+      <div class="decoded-container" id="tabDecoded" style="display:none;">
+        <div class="filter-bar">
+          <span class="filter-label">Filter:</span>
+          <label title="IRA — Iridium Ring Alert (62 symbols). Paging frames with satellite beam ID and GPS coordinates."><input type="checkbox" id="fltIRA" checked onchange="applyDecodedFilter()"> IRA</label>
+          <label title="IBC — Iridium Broadcast Channel (≥200 symbols). Cell info, satellite ID, system time."><input type="checkbox" id="fltIBC" checked onchange="applyDecodedFilter()"> IBC</label>
+          <label title="IDA — Iridium Data Access (~179 symbols). Data frames carrying voice, SMS, SBD, and signaling."><input type="checkbox" id="fltIDA" checked onchange="applyDecodedFilter()"> IDA</label>
+          <label title="ACARS/SBD — Decoded aircraft ACARS messages and Short Burst Data payloads. Requires ACARS Decode enabled."><input type="checkbox" id="fltACARS" checked onchange="applyDecodedFilter()"> ACARS/SBD</label>
+          <label title="Maint — IDA maintenance sub-type: sync, switch, geoloc, power control. Most common IDA type. Requires Parsed IDA enabled."><input type="checkbox" id="fltMaint" checked onchange="applyDecodedFilter()"> Maint</label>
+          <label title="AccHL — IDA access/handoff link setup. Call establishment signaling. Requires Parsed IDA enabled."><input type="checkbox" id="fltAcchl" checked onchange="applyDecodedFilter()"> AccHL</label>
+          <label title="Handoff — IDA handoff responses and candidate frames. Satellite-to-satellite call handover. Requires Parsed IDA enabled."><input type="checkbox" id="fltHndof" checked onchange="applyDecodedFilter()"> Handoff</label>
+          <span class="filter-count" id="filterCount" title="Visible frames / total frames. Filters reduce visible count without discarding data.">0 / 0</span>
+        </div>
+        <table class="decoded-table">
+          <thead>
+            <tr>
+              <th title="Sequential frame number since capture start.">#</th>
+              <th title="Frame type: IRA (ring alert), IBC (broadcast), IDA (data), or IDA sub-types (maint/acchl/hndof).">Type</th>
+              <th title="Timestamp in milliseconds since the start of the capture.">Time (ms)</th>
+              <th title="Center frequency of the detected burst in MHz.">Freq (MHz)</th>
+              <th title="Signal-to-noise ratio of the burst in dB.">SNR (dB)</th>
+              <th title="Noise floor estimate at the burst location in dBFS (dB relative to full scale).">Noise (dBFS)</th>
+              <th title="Demodulation confidence percentage — how well the DQPSK symbols matched ideal constellation points.">Conf %</th>
+              <th title="Absolute signal level of the burst in dBFS.">Level</th>
+              <th title="Number of DQPSK symbols decoded. IRA ≈ 62, IDA ≈ 179, IBC ≥ 200.">Symbols</th>
+              <th title="Internal burst ID assigned by the FFT detector.">Burst ID</th>
+            </tr>
+          </thead>
+          <tbody id="decodedBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Command bar -->
+    <div class="cmd-bar" title="Shows the exact iridium-sniffer command line being executed. Useful for manual troubleshooting in a terminal.">
+      <span class="prompt">$ </span>
+      <span id="cmdDisplay">ready</span>
+    </div>
+
+  </div>
+</div>
+
+<!-- ============================================================ JS -->
+<script>
+// ---- Socket.IO ----
+const socket = io();
+let lineCount = 0;
+const MAX_LINES = 2000;
+
+// ---- Chart ----
+const chartCtx = document.getElementById('liveChart').getContext('2d');
+const chartData = {
+  labels: [],
+  datasets: [
+    {
+      label: 'Frames/s',
+      data: [],
+      borderColor: '#06d6a0',
+      backgroundColor: 'rgba(6, 214, 160, 0.08)',
+      fill: true,
+      tension: 0.3,
+      pointRadius: 0,
+      borderWidth: 2,
+    },
+    {
+      label: 'Ok %',
+      data: [],
+      borderColor: '#fb923c',
+      backgroundColor: 'rgba(251, 146, 60, 0.05)',
+      fill: false,
+      tension: 0.3,
+      pointRadius: 0,
+      borderWidth: 2,
+      yAxisID: 'y1',
+    }
+  ]
+};
+
+const liveChart = new Chart(chartCtx, {
+  type: 'line',
+  data: chartData,
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 300 },
+    scales: {
+      x: {
+        display: true,
+        grid: { color: 'rgba(30,58,95,0.4)' },
+        ticks: { color: '#64748b', font: { size: 10 } },
+      },
+      y: {
+        display: true,
+        position: 'left',
+        grid: { color: 'rgba(30,58,95,0.4)' },
+        ticks: { color: '#06d6a0', font: { size: 10 } },
+        title: { display: true, text: 'Frames/s', color: '#06d6a0', font: { size: 10 } },
+        beginAtZero: true,
+      },
+      y1: {
+        display: true,
+        position: 'right',
+        grid: { drawOnChartArea: false },
+        ticks: { color: '#fb923c', font: { size: 10 } },
+        title: { display: true, text: 'Ok %', color: '#fb923c', font: { size: 10 } },
+        min: 0, max: 100,
+      }
+    },
+    plugins: {
+      legend: {
+        labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 12 }
+      }
+    }
+  }
+});
+
+var prevFrames = 0;
+var chartTick = 0;
+
+// ---- Socket events ----
+
+socket.on('status', (data) => {
+  updateStatus(data.running);
+  if (data.command) {
+    document.getElementById('cmdDisplay').textContent = data.command;
+  }
+  if (data.message) {
+    addLine('termLog', data.message, 'line-system');
+  }
+});
+
+socket.on('stats', (data) => {
+  document.getElementById('statBursts').textContent = (data.bursts || 0).toLocaleString();
+  document.getElementById('statFrames').textContent = (data.frames || 0).toLocaleString();
+  document.getElementById('statOk').textContent = (data.ok_avg || 0).toFixed(1) + '%';
+  document.getElementById('statRate').textContent = (data.input_rate || 0).toFixed(1) + '/s';
+  document.getElementById('statQueue').textContent = data.queue_max || 0;
+  document.getElementById('statDropped').textContent = data.dropped || 0;
+
+  // Update chart
+  chartTick++;
+  const framesPerSec = (data.frames || 0) - prevFrames;
+  prevFrames = data.frames || 0;
+
+  chartData.labels.push(chartTick + 's');
+  chartData.datasets[0].data.push(Math.max(0, framesPerSec));
+  chartData.datasets[1].data.push(data.ok_avg || 0);
+
+  if (chartData.labels.length > 120) {
+    chartData.labels.shift();
+    chartData.datasets[0].data.shift();
+    chartData.datasets[1].data.shift();
+  }
+
+  liveChart.update('none');
+});
+
+socket.on('raw_line', (data) => {
+  const cls = data.data.startsWith('ACARS:') || data.data.startsWith('SBD:') ? 'line-acars' : 'line-raw';
+  addLine('termRaw', data.data, cls);
+});
+
+socket.on('log', (data) => {
+  addLine('termLog', data.data, 'line-log');
+});
+
+// ---- DOM helpers ----
+
+function addLine(termId, text, cls) {
+  const term = document.getElementById(termId);
+  lineCount++;
+  const div = document.createElement('div');
+  div.className = cls;
+  div.innerHTML = '<span class="line-num">' + lineCount + '</span>' + escapeHtml(text);
+  term.appendChild(div);
+
+  // Auto-trim old lines
+  while (term.children.length > MAX_LINES) {
+    term.removeChild(term.firstChild);
+  }
+
+  term.scrollTop = term.scrollHeight;
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function updateStatus(running) {
+  const badge = document.getElementById('statusBadge');
+  const text = document.getElementById('statusText');
+  const btnStart = document.getElementById('btnStart');
+  const btnStop = document.getElementById('btnStop');
+
+  if (running) {
+    badge.className = 'status-badge online';
+    text.textContent = 'CAPTURING';
+    btnStart.style.display = 'none';
+    btnStop.style.display = 'flex';
+  } else {
+    badge.className = 'status-badge offline';
+    text.textContent = 'READY';
+    btnStart.style.display = 'flex';
+    btnStart.disabled = false;
+    btnStop.style.display = 'none';
+  }
+}
+
+function switchTab(el) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  const tab = el.dataset.tab;
+  document.getElementById('termRaw').style.display = tab === 'raw' ? 'block' : 'none';
+  document.getElementById('termLog').style.display = tab === 'log' ? 'block' : 'none';
+  document.getElementById('tabSpectrum').style.display = tab === 'spectrum' ? 'block' : 'none';
+  document.getElementById('tabConstellation').style.display = tab === 'constellation' ? 'flex' : 'none';
+  document.getElementById('tabDecoded').style.display = tab === 'decoded' ? 'block' : 'none';
+  if (tab === 'spectrum') resizeSpectrum();
+  if (tab === 'constellation') drawConstellation();
+}
+
+function toggleMode() {
+  const mode = document.getElementById('inputMode').value;
+  document.getElementById('livePanel').style.display = mode === 'live' ? 'block' : 'none';
+  document.getElementById('filePanel').style.display = mode === 'file' ? 'block' : 'none';
+}
+
+function toggleDeviceGains() {
+  const dt = document.getElementById('deviceType').value;
+  document.getElementById('hackrfGains').style.display = dt === 'hackrf' ? 'block' : 'none';
+  document.getElementById('soapyGains').style.display  = dt === 'soapy'  ? 'block' : 'none';
+
+  // Auto-fill RTL-SDR narrowband defaults vs HackRF wideband
+  if (dt === 'soapy') {
+    document.getElementById('centerFreq').value = '1625500000';
+    document.getElementById('sampleRate').value = '2400000';
+  } else {
+    document.getElementById('centerFreq').value = '1622000000';
+    document.getElementById('sampleRate').value = '10000000';
+  }
+}
+
+// ---- API calls ----
+
+async function scanDevices() {
+  const list = document.getElementById('deviceList');
+  list.innerHTML = '<div style="color:var(--text-muted); font-size:11px; padding:4px;">Scanning...</div>';
+
+  try {
+    const resp = await fetch('/api/devices');
+    const data = await resp.json();
+
+    list.innerHTML = '';
+    if (data.error) {
+      list.innerHTML = '<div class="line-error" style="font-size:11px; padding:4px;">' + escapeHtml(data.error) + '</div>';
+      return;
+    }
+    if (!data.devices || data.devices.length === 0) {
+      list.innerHTML = '<div style="color:var(--text-muted); font-size:11px; padding:4px;">No devices found</div>';
+      return;
+    }
+    data.devices.forEach(d => {
+      const div = document.createElement('div');
+      div.className = 'device-item';
+      div.textContent = d;
+      div.onclick = () => {
+        // Try to extract the device identifier (e.g., "  soapy-0 : ..." → "soapy-0")
+        const match = d.match(/^\s*(soapy-\d+|hackrf-\S+|bladerf\d*|usrp-\S+|sdrplay-\S+)/);
+        if (match) {
+          document.getElementById('interface').value = match[1];
+        } else {
+          document.getElementById('interface').value = d.trim().split(/\s+/)[0];
+        }
+      };
+      list.appendChild(div);
+    });
+
+    // Auto-populate: if interface field is empty, select the first matching device
+    const currentType = document.getElementById('deviceType').value;
+    const ifaceField = document.getElementById('interface');
+    if (!ifaceField.value) {
+      const prefix = currentType === 'hackrf' ? 'hackrf-' : currentType === 'soapy' ? 'soapy-' : '';
+      for (const d of data.devices) {
+        const match = d.match(/^\s*(soapy-\d+|hackrf-\S+|bladerf\d*|usrp-\S+|sdrplay-\S+)/);
+        if (match && match[1].startsWith(prefix)) {
+          ifaceField.value = match[1];
+          break;
+        }
+      }
+    }
+  } catch (e) {
+    list.innerHTML = '<div class="line-error" style="font-size:11px; padding:4px;">Scan failed: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function buildConfig() {
+  const mode = document.getElementById('inputMode').value;
+  const deviceType = document.getElementById('deviceType').value;
+
+  const config = {
+    mode: mode,
+    device_type: deviceType,
+    center_freq: document.getElementById('centerFreq').value,
+    sample_rate: document.getElementById('sampleRate').value,
+    threshold: document.getElementById('threshold').value,
+    bias_tee: document.getElementById('biasTee').checked,
+    simd: document.getElementById('simd').value,
+    chase: document.getElementById('chase').value,
+    no_gardner: !document.getElementById('gardner').checked,
+    no_gpu: !document.getElementById('gpu').checked,
+    verbose: document.getElementById('verbose').checked,
+    web_map: document.getElementById('webMap').checked,
+    web_port: 8888,
+    acars: document.getElementById('acars').checked,
+    acars_json: document.getElementById('acarsJson').checked,
+    gsmtap: document.getElementById('gsmtap').checked,
+    parsed: document.getElementById('parsed').checked,
+    position: document.getElementById('position').checked,
+    zmq: document.getElementById('zmq').checked,
+    station_id: document.getElementById('stationId').value,
+  };
+
+  if (mode === 'live') {
+    config.interface = document.getElementById('interface').value;
+    if (deviceType === 'hackrf') {
+      config.hackrf_lna = document.getElementById('hackrfLna').value;
+      config.hackrf_vga = document.getElementById('hackrfVga').value;
+      config.hackrf_amp = document.getElementById('hackrfAmp').checked;
+    } else {
+      config.soapy_gain = document.getElementById('soapyGain').value;
+    }
+  } else {
+    config.file_path = document.getElementById('filePath').value;
+    config.file_format = document.getElementById('fileFormat').value;
+  }
+
+  return config;
+}
+
+async function startSniffer() {
+  const config = buildConfig();
+
+  // Clear terminals
+  document.getElementById('termRaw').innerHTML = '';
+  document.getElementById('termLog').innerHTML = '';
+  document.getElementById('decodedBody').innerHTML = '';
+  lineCount = 0;
+  prevFrames = 0;
+  chartTick = 0;
+  decodedCount = 0;
+  decodedTotal = 0;
+  decodedVisible = 0;
+  specPoints.length = 0;
+  constFrames.length = 0;
+  if (liveChart && liveChart.data) {
+    liveChart.data.labels = [];
+    liveChart.data.datasets[0].data = [];
+    liveChart.data.datasets[1].data = [];
+    liveChart.update();
+  }
+
+  addLine('termLog', 'Starting iridium-sniffer...', 'line-system');
+
+  document.getElementById('btnStart').disabled = true;
+
+  try {
+    const resp = await fetch('/api/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+    const data = await resp.json();
+
+    if (data.error) {
+      addLine('termLog', 'ERROR: ' + data.error, 'line-error');
+      document.getElementById('btnStart').disabled = false;
+      return;
+    }
+
+    addLine('termLog', 'PID: ' + data.pid, 'line-system');
+    document.getElementById('cmdDisplay').textContent = data.command;
+    updateStatus(true);
+  } catch (e) {
+    addLine('termLog', 'Failed to start: ' + e.message, 'line-error');
+    document.getElementById('btnStart').disabled = false;
+  }
+}
+
+async function stopSniffer() {
+  try {
+    await fetch('/api/stop', { method: 'POST' });
+    addLine('termLog', 'Stop signal sent', 'line-system');
+  } catch (e) {
+    addLine('termLog', 'Stop failed: ' + e.message, 'line-error');
+  }
+}
+
+// ================================================================
+// SPECTRUM DISPLAY (interactive)
+// ================================================================
+const specCanvas = document.getElementById('spectrumCanvas');
+const specCtx = specCanvas.getContext('2d');
+const specTooltip = document.getElementById('specTooltip');
+
+const specPoints = [];
+const SPEC_MAX_AGE = 60;
+const SPEC_MAX_POINTS = 5000;
+
+// Stored layout for hit-testing
+var specLayout = { margin: {left:50,right:15,top:10,bottom:30}, freqMin:0, freqMax:1, plotW:1, plotH:1 };
+
+function resizeSpectrum() {
+  const c = specCanvas.parentElement;
+  specCanvas.width = c.clientWidth;
+  specCanvas.height = c.clientHeight - 30;
+  drawSpectrum();
+}
+
+function addSpectrumPoint(frame) {
+  specPoints.push({
+    freq_hz: frame.freq_hz, snr_db: frame.snr_db, age: 0,
+    conf: frame.confidence, type: frame.type || '?', burst_id: frame.burst_id
+  });
+  if (specPoints.length > SPEC_MAX_POINTS) specPoints.splice(0, specPoints.length - SPEC_MAX_POINTS);
+}
+
+function drawSpectrum() {
+  const W = specCanvas.width, H = specCanvas.height;
+  if (W === 0 || H === 0) return;
+
+  const ctx = specCtx;
+  ctx.fillStyle = '#0a0e17';
+  ctx.fillRect(0, 0, W, H);
+
+  const centerFreq = parseFloat(document.getElementById('centerFreq').value) || 1622000000;
+  const sampleRate = parseFloat(document.getElementById('sampleRate').value) || 10000000;
+  const freqMin = centerFreq - sampleRate / 2;
+  const freqMax = centerFreq + sampleRate / 2;
+
+  document.getElementById('specFreqRange').textContent =
+    (freqMin / 1e6).toFixed(1) + ' \u2014 ' + (freqMax / 1e6).toFixed(1) + ' MHz';
+  document.getElementById('specBurstCount').textContent = specPoints.length + ' bursts';
+
+  const margin = { left: 50, right: 15, top: 10, bottom: 30 };
+  const plotW = W - margin.left - margin.right;
+  const plotH = H - margin.top - margin.bottom;
+  specLayout = { margin, freqMin, freqMax, plotW, plotH };
+
+  // Grid
+  ctx.strokeStyle = 'rgba(30, 58, 95, 0.5)';
+  ctx.lineWidth = 1;
+  const mhzMin = Math.ceil(freqMin / 1e6);
+  const mhzMax = Math.floor(freqMax / 1e6);
+  ctx.font = '10px monospace';
+  ctx.fillStyle = '#64748b';
+  ctx.textAlign = 'center';
+  for (let mhz = mhzMin; mhz <= mhzMax; mhz++) {
+    const x = margin.left + ((mhz * 1e6 - freqMin) / (freqMax - freqMin)) * plotW;
+    ctx.beginPath(); ctx.moveTo(x, margin.top); ctx.lineTo(x, margin.top + plotH); ctx.stroke();
+    ctx.fillText(mhz + '', x, H - 8);
+  }
+  ctx.textAlign = 'right';
+  for (let db = 0; db <= 30; db += 5) {
+    const y = margin.top + plotH - (db / 30) * plotH;
+    ctx.beginPath(); ctx.moveTo(margin.left, y); ctx.lineTo(margin.left + plotW, y); ctx.stroke();
+    ctx.fillText(db + ' dB', margin.left - 5, y + 3);
+  }
+
+  ctx.fillStyle = '#94a3b8';
+  ctx.textAlign = 'center';
+  ctx.fillText('Frequency (MHz)', margin.left + plotW / 2, H - 1);
+
+  // Draw points with type shapes
+  for (let i = 0; i < specPoints.length; i++) {
+    const p = specPoints[i];
+    const xNorm = (p.freq_hz - freqMin) / (freqMax - freqMin);
+    if (xNorm < 0 || xNorm > 1) continue;
+    const x = margin.left + xNorm * plotW;
+    const snrClamped = Math.min(30, Math.max(0, p.snr_db));
+    const y = margin.top + plotH - (snrClamped / 30) * plotH;
+    const alpha = Math.max(0.08, 1 - p.age / SPEC_MAX_AGE);
+    const sz = Math.max(2, 4 - p.age * 0.06);
+
+    let r, g, b;
+    if (p.conf >= 70) { r = 6; g = 214; b = 160; }
+    else if (p.conf >= 40) { r = 251; g = 146; b = 60; }
+    else { r = 239; g = 68; b = 68; }
+
+    ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+
+    if (p.type === 'IRA') {
+      // Triangle
+      ctx.beginPath();
+      ctx.moveTo(x, y - sz); ctx.lineTo(x - sz, y + sz); ctx.lineTo(x + sz, y + sz);
+      ctx.closePath(); ctx.fill();
+    } else if (p.type === 'IBC') {
+      // Diamond
+      ctx.beginPath();
+      ctx.moveTo(x, y - sz); ctx.lineTo(x + sz, y); ctx.lineTo(x, y + sz); ctx.lineTo(x - sz, y);
+      ctx.closePath(); ctx.fill();
+    } else {
+      // Circle (IDA/default)
+      ctx.beginPath();
+      ctx.arc(x, y, sz, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Threshold line
+  if (specPoints.length > 0 || true) {
+    const threshDb = parseFloat(document.getElementById('threshold').value) || 16;
+    const threshY = margin.top + plotH - (Math.min(30, threshDb) / 30) * plotH;
+    ctx.strokeStyle = 'rgba(245, 158, 11, 0.5)';
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath(); ctx.moveTo(margin.left, threshY); ctx.lineTo(margin.left + plotW, threshY); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#f59e0b';
+    ctx.textAlign = 'left';
+    ctx.fillText('Threshold ' + threshDb + ' dB', margin.left + 4, threshY - 4);
+  }
+
+  // Legend
+  ctx.font = '10px monospace';
+  ctx.textAlign = 'left';
+  const lx = W - 175, ly = margin.top + 12;
+  ctx.fillStyle = '#64748b';
+  ctx.fillText('\u25B2 IRA   \u25C6 IBC   \u25CF IDA', lx, ly);
+}
+
+// Spectrum mouse interaction
+specCanvas.addEventListener('mousemove', (e) => {
+  const rect = specCanvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) * (specCanvas.width / rect.width);
+  const my = (e.clientY - rect.top) * (specCanvas.height / rect.height);
+  const { margin, freqMin, freqMax, plotW, plotH } = specLayout;
+
+  // Convert to freq/snr
+  const fx = margin.left, fy = margin.top;
+  if (mx < fx || mx > fx + plotW || my < fy || my > fy + plotH) {
+    specTooltip.style.display = 'none';
+    return;
+  }
+
+  const freqAtMouse = freqMin + ((mx - fx) / plotW) * (freqMax - freqMin);
+  const snrAtMouse = 30 * (1 - (my - fy) / plotH);
+
+  // Find nearest point within 12px
+  let nearest = null, nearestDist = 144;
+  for (let i = specPoints.length - 1; i >= 0; i--) {
+    const p = specPoints[i];
+    const xNorm = (p.freq_hz - freqMin) / (freqMax - freqMin);
+    if (xNorm < 0 || xNorm > 1) continue;
+    const px = fx + xNorm * plotW;
+    const snrClamped = Math.min(30, Math.max(0, p.snr_db));
+    const py = fy + plotH - (snrClamped / 30) * plotH;
+    const d = (px - mx) * (px - mx) + (py - my) * (py - my);
+    if (d < nearestDist) { nearestDist = d; nearest = p; }
+  }
+
+  if (nearest) {
+    specTooltip.innerHTML =
+      '<b>' + nearest.type + '</b> #' + nearest.burst_id + '<br>' +
+      (nearest.freq_hz / 1e6).toFixed(4) + ' MHz<br>' +
+      nearest.snr_db.toFixed(1) + ' dB &nbsp; ' + nearest.conf + '% conf';
+    specTooltip.style.display = 'block';
+    specTooltip.style.left = (e.clientX - rect.left + 14) + 'px';
+    specTooltip.style.top = (e.clientY - rect.top - 10) + 'px';
+  } else {
+    specTooltip.innerHTML = (freqAtMouse / 1e6).toFixed(4) + ' MHz &nbsp; ' + snrAtMouse.toFixed(1) + ' dB';
+    specTooltip.style.display = 'block';
+    specTooltip.style.left = (e.clientX - rect.left + 14) + 'px';
+    specTooltip.style.top = (e.clientY - rect.top - 10) + 'px';
+  }
+});
+
+specCanvas.addEventListener('mouseleave', () => {
+  specTooltip.style.display = 'none';
+});
+
+// Age spectrum points and redraw periodically
+setInterval(() => {
+  for (let i = specPoints.length - 1; i >= 0; i--) {
+    specPoints[i].age++;
+    if (specPoints[i].age > SPEC_MAX_AGE) specPoints.splice(i, 1);
+  }
+  if (document.getElementById('tabSpectrum').style.display !== 'none') drawSpectrum();
+}, 1000);
+
+
+// ================================================================
+// CONSTELLATION DISPLAY
+// ================================================================
+const constCanvas = document.getElementById('constellationCanvas');
+const constCtx = constCanvas.getContext('2d');
+
+// Ring buffer of recent frame constellation data
+const constFrames = [];
+const CONST_MAX_FRAMES = 200;
+const CONST_IDEAL = [
+  { i:  1, q:  1 },  // 45°
+  { i: -1, q:  1 },  // 135°
+  { i: -1, q: -1 },  // 225°
+  { i:  1, q: -1 },  // 315°
+];
+
+function addConstellationFrame(frame) {
+  constFrames.push({ confidence: frame.confidence, snr_db: frame.snr_db, symbols: frame.symbols, age: 0 });
+  if (constFrames.length > CONST_MAX_FRAMES) constFrames.shift();
+}
+
+function drawConstellation() {
+  const W = constCanvas.width, H = constCanvas.height;
+  const ctx = constCtx;
+  const cx = W / 2, cy = H / 2;
+  const scale = W * 0.35;
+
+  // Background
+  ctx.fillStyle = '#0a0e17';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid circles
+  ctx.strokeStyle = 'rgba(30, 58, 95, 0.4)';
+  ctx.lineWidth = 1;
+  for (let r = 0.25; r <= 1.5; r += 0.25) {
+    ctx.beginPath(); ctx.arc(cx, cy, r * scale, 0, Math.PI * 2); ctx.stroke();
+  }
+  // Crosshair
+  ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(W, cy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke();
+
+  // Axis labels
+  ctx.font = '10px monospace';
+  ctx.fillStyle = '#64748b';
+  ctx.textAlign = 'center';
+  ctx.fillText('I', W - 10, cy - 6);
+  ctx.fillText('Q', cx + 10, 14);
+
+  // Ideal QPSK constellation points
+  ctx.fillStyle = 'rgba(34, 211, 238, 0.3)';
+  CONST_IDEAL.forEach(p => {
+    ctx.beginPath();
+    ctx.arc(cx + p.i * scale, cy - p.q * scale, 8, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Draw constellation symbols from each frame
+  // For each frame, we simulate N scattered points around the 4 ideal QPSK positions
+  // Scatter radius is inversely proportional to confidence
+  let totalConf = 0, totalSnr = 0, bestConf = 0, totalSym = 0;
+
+  for (let fi = 0; fi < constFrames.length; fi++) {
+    const f = constFrames[fi];
+    totalConf += f.confidence;
+    totalSnr += f.snr_db;
+    totalSym += f.symbols;
+    if (f.confidence > bestConf) bestConf = f.confidence;
+    const alpha = Math.max(0.06, 0.8 - f.age / CONST_MAX_FRAMES * 0.7);
+    const scatterRadius = (100 - f.confidence) / 100 * 0.6; // 0..0.6 normalized
+
+    // Generate deterministic pseudo-random scatter for this frame
+    const dotsPerQuadrant = Math.min(8, Math.ceil(f.symbols / 40));
+    let seed = fi * 7919 + f.confidence * 31;
+    function pseudoRand() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
+
+    for (let q = 0; q < 4; q++) {
+      const ideal = CONST_IDEAL[q];
+      for (let d = 0; d < dotsPerQuadrant; d++) {
+        const angle = pseudoRand() * Math.PI * 2;
+        const dist = pseudoRand() * scatterRadius;
+        const si = ideal.i + Math.cos(angle) * dist;
+        const sq = ideal.q + Math.sin(angle) * dist;
+        const px = cx + si * scale;
+        const py = cy - sq * scale;
+
+        let r, g, b;
+        if (f.confidence >= 70) { r = 6; g = 214; b = 160; }
+        else if (f.confidence >= 40) { r = 251; g = 146; b = 60; }
+        else { r = 239; g = 68; b = 68; }
+
+        ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+        ctx.beginPath();
+        ctx.arc(px, py, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  // Ideal points label
+  ctx.font = 'bold 11px monospace';
+  ctx.fillStyle = '#22d3ee';
+  ctx.textAlign = 'center';
+  CONST_IDEAL.forEach((p, i) => {
+    ctx.fillText(['00','01','11','10'][i], cx + p.i * scale, cy - p.q * scale - 14);
+  });
+
+  // Title
+  ctx.font = '10px monospace';
+  ctx.fillStyle = '#94a3b8';
+  ctx.textAlign = 'left';
+  ctx.fillText('DQPSK CONSTELLATION', 8, 16);
+
+  // Update sidebar stats
+  const n = constFrames.length;
+  document.getElementById('constFrames').textContent = n;
+  document.getElementById('constAvgConf').textContent = n ? (totalConf / n).toFixed(1) + '%' : '—';
+  document.getElementById('constAvgSnr').textContent = n ? (totalSnr / n).toFixed(1) + ' dB' : '—';
+  document.getElementById('constBestConf').textContent = n ? bestConf + '%' : '—';
+  document.getElementById('constSymRate').textContent = n ? Math.round(totalSym / n) : '—';
+}
+
+// Redraw constellation periodically to age points
+setInterval(() => {
+  for (let i = 0; i < constFrames.length; i++) constFrames[i].age++;
+  if (document.getElementById('tabConstellation').style.display !== 'none') drawConstellation();
+}, 1000);
+
+
+// ================================================================
+// DECODED DATA TABLE with frame type filtering
+// ================================================================
+const decodedBody = document.getElementById('decodedBody');
+let decodedCount = 0;
+let decodedTotal = 0;
+let decodedVisible = 0;
+const DECODED_MAX_ROWS = 1000;
+
+// Type counters
+const typeCounts = { IRA: 0, IBC: 0, IDA: 0, ACARS: 0, 'IDA-maint': 0, 'IDA-acchl': 0, 'IDA-hndof': 0 };
+
+function typeBadge(type) {
+  const cls = type === 'IRA' ? 'type-ira' : type === 'IBC' ? 'type-ibc' :
+              type.startsWith('ACARS') || type === 'SBD' ? 'type-acars' : 'type-ida';
+  return '<span class="type-badge ' + cls + '">' + escapeHtml(type) + '</span>';
+}
+
+function isTypeVisible(type) {
+  if (type === 'IRA') return document.getElementById('fltIRA').checked;
+  if (type === 'IBC') return document.getElementById('fltIBC').checked;
+  if (type === 'ACARS' || type === 'SBD') return document.getElementById('fltACARS').checked;
+  if (type === 'IDA-maint') return document.getElementById('fltMaint').checked;
+  if (type === 'IDA-acchl') return document.getElementById('fltAcchl').checked;
+  if (type === 'IDA-hndof') return document.getElementById('fltHndof').checked;
+  if (type === 'IDA') return document.getElementById('fltIDA').checked;
+  return true;
+}
+
+function updateFilterCount() {
+  document.getElementById('filterCount').textContent = decodedVisible + ' / ' + decodedTotal;
+}
+
+function applyDecodedFilter() {
+  decodedVisible = 0;
+  const rows = decodedBody.querySelectorAll('tr');
+  rows.forEach(tr => {
+    const type = tr.dataset.type || '';
+    const show = isTypeVisible(type);
+    tr.style.display = show ? '' : 'none';
+    if (show) decodedVisible++;
+  });
+  updateFilterCount();
+}
+
+function addDecodedRow(frame) {
+  decodedCount++;
+  decodedTotal++;
+  const type = frame.type || 'IDA';
+  typeCounts[type] = (typeCounts[type] || 0) + 1;
+
+  const tr = document.createElement('tr');
+  tr.dataset.type = type;
+  const confClass = frame.confidence >= 70 ? 'conf-high' : frame.confidence >= 40 ? 'conf-mid' : 'conf-low';
+  tr.innerHTML =
+    '<td>' + decodedCount + '</td>' +
+    '<td>' + typeBadge(type) + '</td>' +
+    '<td>' + frame.time_ms.toFixed(4) + '</td>' +
+    '<td>' + (frame.freq_hz / 1e6).toFixed(4) + '</td>' +
+    '<td>' + frame.snr_db.toFixed(1) + '</td>' +
+    '<td>' + frame.noise_dbfs.toFixed(1) + '</td>' +
+    '<td class="' + confClass + '">' + frame.confidence + '%</td>' +
+    '<td>' + frame.level.toFixed(5) + '</td>' +
+    '<td>' + frame.symbols + '</td>' +
+    '<td>' + frame.burst_id + '</td>';
+
+  if (!isTypeVisible(type)) {
+    tr.style.display = 'none';
+  } else {
+    decodedVisible++;
+  }
+
+  if (decodedBody.firstChild) {
+    decodedBody.insertBefore(tr, decodedBody.firstChild);
+  } else {
+    decodedBody.appendChild(tr);
+  }
+  while (decodedBody.children.length > DECODED_MAX_ROWS) {
+    const removed = decodedBody.lastChild;
+    if (removed.style.display !== 'none') decodedVisible--;
+    decodedBody.removeChild(removed);
+    decodedTotal--;
+  }
+  updateFilterCount();
+}
+
+function addDecodedAcarsRow(text, type) {
+  decodedCount++;
+  decodedTotal++;
+  const rowType = type || 'ACARS';
+  typeCounts[rowType] = (typeCounts[rowType] || 0) + 1;
+
+  const tr = document.createElement('tr');
+  tr.className = rowType.startsWith('IDA') ? 'ida-row' : 'acars-row';
+  tr.dataset.type = rowType;
+  tr.innerHTML = '<td>' + decodedCount + '</td><td>' + typeBadge(rowType) + '</td><td colspan="8">' + escapeHtml(text) + '</td>';
+
+  if (!isTypeVisible(rowType)) {
+    tr.style.display = 'none';
+  } else {
+    decodedVisible++;
+  }
+
+  if (decodedBody.firstChild) {
+    decodedBody.insertBefore(tr, decodedBody.firstChild);
+  } else {
+    decodedBody.appendChild(tr);
+  }
+  while (decodedBody.children.length > DECODED_MAX_ROWS) {
+    const removed = decodedBody.lastChild;
+    if (removed.style.display !== 'none') decodedVisible--;
+    decodedBody.removeChild(removed);
+    decodedTotal--;
+  }
+  updateFilterCount();
+}
+
+// ================================================================
+// FRAME EVENT HANDLER (from backend parsed RAW lines)
+// ================================================================
+socket.on('frame', (frame) => {
+  addSpectrumPoint(frame);
+  addConstellationFrame(frame);
+  addDecodedRow(frame);
+});
+
+// IDA parsed lines with sub-type info
+socket.on('ida_frame', (data) => {
+  addDecodedAcarsRow(data.data, data.type);
+});
+
+// Also catch ACARS/SBD lines for decoded tab
+socket.on('raw_line', (data) => {
+  if (data.data.startsWith('ACARS:') || data.data.startsWith('SBD:')) {
+    addDecodedAcarsRow(data.data, 'ACARS');
+  }
+});
+
+// ================================================================
+// Resize handlers
+// ================================================================
+window.addEventListener('resize', () => {
+  if (document.getElementById('tabSpectrum').style.display !== 'none') resizeSpectrum();
+});
+
+// ---- Init ----
+document.addEventListener('DOMContentLoaded', () => {
+  addLine('termLog', 'iridium-sniffer Mission Control NXC2 Edition ready — forked from alphafox02/iridium-sniffer', 'line-system');
+  addLine('termLog', 'Scanning for SDR devices...', 'line-system');
+  // Auto-scan for devices on load
+  scanDevices();
+  // Initialize constellation
+  drawConstellation();
+});
+</script>
+
+</body>
+</html>
