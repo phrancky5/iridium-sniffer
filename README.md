@@ -1,9 +1,10 @@
 # iridium-sniffer — NXC2 Edition
 
-> **Forked from [alphafox02/iridium-sniffer](https://github.com/alphafox02/iridium-sniffer)**
+> **Forked from [alphafox02/iridium-sniffer](https://github.com/alphafox02/iridium-sniffer)**  
+> **NXC2 Edition — Analyst, Coder & Architect: Max Elevation**
 
 A standalone Iridium satellite burst detector and demodulator written in C. It provides an alternative to [gr-iridium](https://github.com/muccc/gr-iridium) by eliminating the GNU Radio dependency, while producing the same [iridium-toolkit](https://github.com/muccc/iridium-toolkit) compatible RAW output on stdout. For users who want a lighter-weight, dependency-free option or need embedded deployment, this offers similar functionality with a different architectural approach.
-
+![alt text](image.png)
 Supports HackRF, BladeRF, USRP (UHD), SDRplay (native API), and SoapySDR for live capture, or processes IQ recordings from file. Optional GPU-accelerated burst detection is available via OpenCL (NVIDIA, AMD, Intel) as a runtime plugin -- the main binary works on systems without GPU support. Runs on Raspberry Pi 5 and other ARM boards in CPU-only mode with FFTW wisdom pre-generation.
 
 A built-in web map (`--web`, beta) provides a real-time Leaflet.js visualization of decoded ring alert positions and active satellites -- no external tools or Python required.

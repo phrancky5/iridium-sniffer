@@ -1,5 +1,8 @@
 """
-iridium-sniffer Mission Control — Flask + Socket.IO backend
+iridium-sniffer Mission Control — NXC2 Edition
+Analyst, Coder & Architect: Max Elevation
+
+Flask + Socket.IO backend
 
 Runs iridium-sniffer as a managed subprocess, streams stdout/stderr
 to the browser in real-time via WebSocket, and exposes a REST API

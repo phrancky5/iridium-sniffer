@@ -1,4 +1,6 @@
-# iridium-sniffer Architecture
+# iridium-sniffer Architecture — NXC2 Edition
+
+**Analyst, Coder & Architect: Max Elevation**
 
 Standalone Iridium satellite burst detector and demodulator. Replaces gr-iridium by eliminating the GNU Radio dependency while reusing ice9-bluetooth-sniffer's SDR abstraction and build system. Outputs iridium-toolkit compatible RAW format to stdout.
 
