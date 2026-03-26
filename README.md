@@ -623,6 +623,21 @@ The IQ format is auto-detected from the file extension (`.cf32`/`.fc32`/`.cfile`
 ./iridium-sniffer -f recording.cf32 -r 10000000 -c 1622000000
 ```
 
+**SigMF support:** When the input file has a `.sigmf-data` or `.sigmf-meta` extension, iridium-sniffer reads the companion `.sigmf-meta` JSON file and auto-applies sample rate, center frequency, and data format. This allows zero-config playback of SigMF recordings:
+
+```bash
+# All parameters auto-detected from .sigmf-meta
+./iridium-sniffer -f recording.sigmf-data
+
+# Passing .sigmf-meta directly also works (auto-opens the .sigmf-data)
+./iridium-sniffer -f recording.sigmf-meta
+
+# Explicit flags override SigMF metadata
+./iridium-sniffer -f recording.sigmf-data -r 5000000
+```
+
+Supported SigMF datatypes: `cf32_le`, `ci16_le`, `ci8`, `cu8`. Command-line flags (`-r`, `-c`, `--format`) always take priority over SigMF metadata.
+
 ### Live Capture
 
 Specifying `-i` selects an SDR interface and implies live capture (no `-l` needed). Use `--list` to see available devices:

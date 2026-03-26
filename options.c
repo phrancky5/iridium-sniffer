@@ -11,12 +11,14 @@
 
 #include <err.h>
 #include <getopt.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #include "sdr.h"
+#include "sigmf.h"
 #include "simd_kernels.h"
 
 #ifdef HAVE_HACKRF
@@ -722,6 +724,62 @@ void parse_options(int argc, char **argv) {
                      strcmp(ext, ".sc16") == 0)
                 iq_format = FMT_CI16;
             /* .ci8 and other extensions keep the ci8 default */
+        }
+    }
+
+    /* SigMF metadata auto-configuration for file input.
+     * If -f points to a .sigmf-data or .sigmf-meta file, read the companion
+     * .sigmf-meta and auto-apply sample rate, center frequency, and format
+     * for any values not explicitly set on the command line. */
+    if (in_filename) {
+        const char *ext = strrchr(in_filename, '.');
+        char meta_path[PATH_MAX];
+        int have_sigmf = 0;
+
+        if (ext && strcmp(ext, ".sigmf-meta") == 0) {
+            /* User passed the meta file -- switch to the data file for -f */
+            snprintf(meta_path, sizeof(meta_path), "%s", in_filename);
+            size_t base_len = (size_t)(ext - in_filename);
+            char data_path[PATH_MAX];
+            snprintf(data_path, sizeof(data_path), "%.*s.sigmf-data",
+                     (int)base_len, in_filename);
+            /* Reopen as data file (in_file currently points to meta) */
+            fclose(in_file);
+            in_file = fopen(data_path, "rb");
+            if (in_file == NULL)
+                err(1, "Cannot open SigMF data file '%s'", data_path);
+            have_sigmf = 1;
+        } else if (ext && strcmp(ext, ".sigmf-data") == 0) {
+            /* User passed the data file -- look for companion meta */
+            size_t base_len = (size_t)(ext - in_filename);
+            snprintf(meta_path, sizeof(meta_path), "%.*s.sigmf-meta",
+                     (int)base_len, in_filename);
+            have_sigmf = 1;
+        }
+
+        if (have_sigmf) {
+            double sigmf_sr = -1, sigmf_freq = -1;
+            int sigmf_fmt = -1;
+
+            if (sigmf_read_meta(meta_path, &sigmf_sr, &sigmf_freq,
+                                &sigmf_fmt) == 0) {
+                if (sigmf_fmt >= 0 && !format_explicit) {
+                    iq_format = (iq_format_t)sigmf_fmt;
+                    const char *fmt_names[] = { "ci8", "ci16", "cf32" };
+                    fprintf(stderr, "sigmf: auto-detected format=%s\n",
+                            fmt_names[iq_format]);
+                }
+                if (sigmf_sr > 0 && !samp_rate_explicit) {
+                    samp_rate = sigmf_sr;
+                    fprintf(stderr, "sigmf: auto-detected sample_rate=%.0f Hz\n",
+                            sigmf_sr);
+                }
+                if (sigmf_freq > 0 && !center_freq_explicit) {
+                    center_freq = sigmf_freq;
+                    fprintf(stderr, "sigmf: auto-detected center_freq=%.0f Hz\n",
+                            sigmf_freq);
+                }
+            }
         }
     }
 
