@@ -113,6 +113,9 @@ extern int zmq_sub_enabled;
 extern char *zmq_sub_endpoint;
 extern int vita49_enabled;
 extern char *vita49_endpoint;
+extern int samp_rate_explicit;
+extern int center_freq_explicit;
+extern int iq_format_explicit;
 extern int clock_source;
 extern int time_source;
 
@@ -197,7 +200,8 @@ static void usage(int exitcode) {
 "                             (default: tcp://127.0.0.1:5555, use with -f and -r)\n"
 #endif
 "    --vita49[=IP:PORT]    receive IQ via VITA 49 (VRT) UDP packets\n"
-"                             (default: 0.0.0.0:4991, use with --format and -r)\n"
+"                             (default: 0.0.0.0:4991, auto-detects -r/-c/format\n"
+"                             from VRT context packets if not specified)\n"
 "    -v, --verbose           verbose output to stderr\n"
 "    -h, --help              show this help\n"
 "    --list                  list available SDR interfaces\n"
@@ -373,10 +377,12 @@ void parse_options(int argc, char **argv) {
 
             case 'c':
                 center_freq = atof(optarg);
+                center_freq_explicit = 1;
                 break;
 
             case 'r':
                 samp_rate = atof(optarg);
+                samp_rate_explicit = 1;
                 break;
 
             case 'B':
@@ -397,6 +403,7 @@ void parse_options(int argc, char **argv) {
 
             case OPT_FORMAT:
                 format_explicit = 1;
+                iq_format_explicit = 1;
                 if (strcmp(optarg, "ci8") == 0)
                     iq_format = FMT_CI8;
                 else if (strcmp(optarg, "ci16") == 0)
@@ -718,9 +725,14 @@ void parse_options(int argc, char **argv) {
         }
     }
 
-    if (samp_rate <= 0)
-        errx(1, "Invalid sample rate: %.0f", samp_rate);
+    /* Skip validation if VITA 49 will auto-detect from context packets */
+    if (!vita49_enabled || samp_rate_explicit) {
+        if (samp_rate <= 0)
+            errx(1, "Invalid sample rate: %.0f", samp_rate);
+    }
 
-    if (center_freq <= 0)
-        errx(1, "Invalid center frequency: %.0f", center_freq);
+    if (!vita49_enabled || center_freq_explicit) {
+        if (center_freq <= 0)
+            errx(1, "Invalid center frequency: %.0f", center_freq);
+    }
 }

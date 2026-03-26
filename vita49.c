@@ -8,6 +8,7 @@
 #include <arpa/inet.h>
 #include <err.h>
 #include <errno.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -29,6 +30,12 @@ extern int vita49_enabled;
 extern char *vita49_endpoint;
 extern double samp_rate;
 extern double center_freq;
+extern int samp_rate_explicit;
+extern int center_freq_explicit;
+extern int iq_format_explicit;
+extern pthread_mutex_t vita49_ctx_mutex;
+extern pthread_cond_t vita49_ctx_cond;
+extern int vita49_ctx_ready;
 
 #define VITA49_DEFAULT_PORT 4991
 #define VRT_MAX_PKT 65536
@@ -65,33 +72,78 @@ static uint64_t read_be64(const uint32_t *p)
  * Each set bit means the corresponding field is present, in order from
  * MSB to LSB.  Fields appear in the body in MSB-first order.
  */
+#define CIF_CHANGE_IND      (1u << 31)
+#define CIF_REF_POINT_ID    (1u << 30)
 #define CIF_BANDWIDTH       (1u << 29)
 #define CIF_IF_REF_FREQ     (1u << 28)
 #define CIF_RF_REF_FREQ     (1u << 27)
+#define CIF_RF_FREQ_OFFSET  (1u << 26)
 #define CIF_IF_BAND_OFFSET  (1u << 25)
 #define CIF_REF_LEVEL       (1u << 24)
 #define CIF_GAIN            (1u << 23)
+#define CIF_OVER_RANGE      (1u << 22)
 #define CIF_SAMPLE_RATE     (1u << 21)
-/* Field sizes (in 32-bit words) for the fields before sample rate */
+#define CIF_DATA_FORMAT     (1u << 15)
+
+/* CIF0 field table: bit flag and size in 32-bit words, MSB-first order.
+ * Walk this table to find field offsets within context packet body. */
 static const struct { uint32_t bit; unsigned words; } cif_fields[] = {
-    /* Fields in order from MSB of CIF0 that appear before sample rate.
-     * Each 64-bit fixed-point field is 2 words; 32-bit fields are 1 word. */
-    { 1u << 31, 1 },  /* context field change indicator */
-    { 1u << 30, 1 },  /* reference point ID */
-    { CIF_BANDWIDTH,    2 },  /* bandwidth */
-    { CIF_IF_REF_FREQ,  2 },  /* IF reference frequency */
-    { CIF_RF_REF_FREQ,  2 },  /* RF reference frequency */
-    { 1u << 26, 2 },  /* RF/IF frequency offset */
+    { CIF_CHANGE_IND,     1 },  /* context field change indicator */
+    { CIF_REF_POINT_ID,   1 },  /* reference point ID */
+    { CIF_BANDWIDTH,      2 },  /* bandwidth */
+    { CIF_IF_REF_FREQ,    2 },  /* IF reference frequency */
+    { CIF_RF_REF_FREQ,    2 },  /* RF reference frequency */
+    { CIF_RF_FREQ_OFFSET, 2 },  /* RF/IF frequency offset */
     { CIF_IF_BAND_OFFSET, 2 },  /* IF band offset */
-    { CIF_REF_LEVEL,    1 },  /* reference level (16-bit in 32-bit word) */
-    { CIF_GAIN,         1 },  /* gain (two 16-bit in 32-bit word) */
-    { 1u << 22, 1 },  /* over-range count */
-    { CIF_SAMPLE_RATE,  2 },  /* sample rate -- this is what we want */
+    { CIF_REF_LEVEL,      1 },  /* reference level (16-bit in 32-bit word) */
+    { CIF_GAIN,           1 },  /* gain (two 16-bit in 32-bit word) */
+    { CIF_OVER_RANGE,     1 },  /* over-range count */
+    { CIF_SAMPLE_RATE,    2 },  /* sample rate */
+    { 1u << 20, 2 },  /* timestamp adjustment */
+    { 1u << 19, 1 },  /* timestamp calibration time */
+    { 1u << 18, 1 },  /* temperature */
+    { 1u << 17, 2 },  /* device identifier */
+    { 1u << 16, 1 },  /* state/event indicators */
+    { CIF_DATA_FORMAT,    2 },  /* data packet payload format */
 };
 
 /*
- * Parse a VRT IF context packet (type 0x4) for sample rate and RF frequency.
- * Logs values on first reception and warns if they differ from command-line.
+ * Parse the data packet payload format field (VITA 49.0 section 7.1.5.18).
+ * Returns the detected IQ format, or -1 if unrecognized.
+ *
+ * Word 1 layout:
+ *   [31:30] real/complex: 0=real, 1=complex cartesian
+ *   [28:24] data item format (DIF): 0=signed int, 14=float32, 15=float64,
+ *           16=unsigned int
+ *   [4:0]   data item size minus 1 (e.g. 7=8-bit, 15=16-bit, 31=32-bit)
+ */
+static int vrt_parse_data_format(uint32_t fmt_word1)
+{
+    unsigned real_cpx  = (fmt_word1 >> 29) & 0x3;
+    unsigned dif       = (fmt_word1 >> 24) & 0x1F;
+    unsigned data_bits = (fmt_word1 & 0x1F) + 1;
+
+    /* Only handle complex formats (real_cpx == 1) */
+    if (real_cpx != 1)
+        return -1;
+
+    if (dif == 0) {
+        /* Signed integer */
+        if (data_bits == 8)  return FMT_CI8;
+        if (data_bits == 16) return FMT_CI16;
+    } else if (dif == 14) {
+        /* IEEE 754 float32 */
+        return FMT_CF32;
+    }
+
+    return -1;  /* Unsupported format */
+}
+
+/*
+ * Parse a VRT IF context packet (type 0x4) for sample rate, RF frequency,
+ * and data format. Auto-applies values not explicitly set on command line.
+ * Signals vita49_ctx_cond when context is received so main can proceed
+ * with pipeline creation.
  */
 static void vrt_handle_context(const uint8_t *vrt, size_t vrt_len,
                                 int *ctx_logged)
@@ -123,11 +175,12 @@ static void vrt_handle_context(const uint8_t *vrt, size_t vrt_len,
     uint32_t cif0 = ntohl(words[off_w]);
     off_w++;  /* move past CIF0 */
 
-    /* Walk the CIF0 fields in order to find RF frequency and sample rate */
+    /* Walk the CIF0 fields in order to extract metadata */
     double rf_freq_hz = 0;
     int have_rf = 0;
     double ctx_samp_rate = 0;
     int have_sr = 0;
+    int detected_format = -1;
 
     for (unsigned i = 0; i < sizeof(cif_fields)/sizeof(cif_fields[0]); i++) {
         if (!(cif0 & cif_fields[i].bit))
@@ -146,33 +199,71 @@ static void vrt_handle_context(const uint8_t *vrt, size_t vrt_len,
             uint64_t val = read_be64(&words[off_w]);
             ctx_samp_rate = (double)(int64_t)val / (1LL << 20);
             have_sr = 1;
+        } else if (cif_fields[i].bit == CIF_DATA_FORMAT) {
+            detected_format = vrt_parse_data_format(ntohl(words[off_w]));
         }
 
         off_w += cif_fields[i].words;
     }
 
-    if (!have_rf && !have_sr)
+    if (!have_rf && !have_sr && detected_format < 0)
         return;
 
     if (*ctx_logged)
         return;
     *ctx_logged = 1;
 
+    /* Auto-apply or warn for sample rate */
     if (have_sr) {
-        fprintf(stderr, "vita49: context reports sample_rate=%.0f Hz\n",
-                ctx_samp_rate);
-        if (ctx_samp_rate - samp_rate > 1.0 || samp_rate - ctx_samp_rate > 1.0)
-            fprintf(stderr, "vita49: WARNING: source sample rate %.0f Hz "
-                    "differs from -r %.0f Hz\n", ctx_samp_rate, samp_rate);
+        if (!samp_rate_explicit) {
+            samp_rate = ctx_samp_rate;
+            fprintf(stderr, "vita49: auto-detected sample_rate=%.0f Hz\n",
+                    ctx_samp_rate);
+        } else {
+            fprintf(stderr, "vita49: context reports sample_rate=%.0f Hz\n",
+                    ctx_samp_rate);
+            if (ctx_samp_rate - samp_rate > 1.0 ||
+                samp_rate - ctx_samp_rate > 1.0)
+                fprintf(stderr, "vita49: WARNING: source sample rate %.0f Hz "
+                        "differs from -r %.0f Hz\n", ctx_samp_rate, samp_rate);
+        }
     }
 
+    /* Auto-apply or warn for RF frequency */
     if (have_rf) {
-        fprintf(stderr, "vita49: context reports rf_freq=%.0f Hz\n",
-                rf_freq_hz);
-        if (rf_freq_hz - center_freq > 1.0 || center_freq - rf_freq_hz > 1.0)
-            fprintf(stderr, "vita49: WARNING: source RF freq %.0f Hz "
-                    "differs from -c %.0f Hz\n", rf_freq_hz, center_freq);
+        if (!center_freq_explicit) {
+            center_freq = rf_freq_hz;
+            fprintf(stderr, "vita49: auto-detected rf_freq=%.0f Hz\n",
+                    rf_freq_hz);
+        } else {
+            fprintf(stderr, "vita49: context reports rf_freq=%.0f Hz\n",
+                    rf_freq_hz);
+            if (rf_freq_hz - center_freq > 1.0 ||
+                center_freq - rf_freq_hz > 1.0)
+                fprintf(stderr, "vita49: WARNING: source RF freq %.0f Hz "
+                        "differs from -c %.0f Hz\n", rf_freq_hz, center_freq);
+        }
     }
+
+    /* Auto-apply or error on format mismatch (wrong format = garbage output) */
+    if (detected_format >= 0) {
+        const char *fmt_names[] = { "ci8", "ci16", "cf32" };
+        if (!iq_format_explicit) {
+            iq_format = (iq_format_t)detected_format;
+            fprintf(stderr, "vita49: auto-detected format=%s\n",
+                    fmt_names[detected_format]);
+        } else if ((int)iq_format != detected_format) {
+            errx(1, "vita49: source format is %s but --format %s was "
+                 "specified (mismatched format produces unusable output)",
+                 fmt_names[detected_format], fmt_names[iq_format]);
+        }
+    }
+
+    /* Signal main thread that context has been received */
+    pthread_mutex_lock(&vita49_ctx_mutex);
+    vita49_ctx_ready = 1;
+    pthread_cond_signal(&vita49_ctx_cond);
+    pthread_mutex_unlock(&vita49_ctx_mutex);
 }
 
 /*

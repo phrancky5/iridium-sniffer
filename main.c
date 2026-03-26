@@ -183,6 +183,16 @@ char *zmq_sub_endpoint = NULL;
 int vita49_enabled = 0;
 char *vita49_endpoint = NULL;
 
+/* Track whether -r, -c, --format were explicitly set (for VITA 49 auto-config) */
+int samp_rate_explicit = 0;
+int center_freq_explicit = 0;
+int iq_format_explicit = 0;
+
+/* VITA 49 context synchronization: vita49 thread signals when context is received */
+pthread_mutex_t vita49_ctx_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t vita49_ctx_cond = PTHREAD_COND_INITIALIZER;
+int vita49_ctx_ready = 0;
+
 /* ---- Beam cache for ACARS aircraft position correlation ---- */
 /* Stores recent IRA ground beam positions (alt < 100) so the ACARS
  * callback can correlate a received message with the beam it arrived on. */
@@ -895,6 +905,41 @@ int main(int argc, char **argv) {
     blocking_queue_init(&frame_queue, FRAME_QUEUE_SIZE);
     blocking_queue_init(&output_queue, OUTPUT_QUEUE_SIZE);
 
+    /* VITA 49 auto-config: start the listener thread early so context packets
+     * can provide sample rate, center frequency, and data format before the
+     * burst detector is created (which needs those values at init time). */
+    if (vita49_enabled) {
+        pthread_create(&spewer, NULL, vita49_thread, NULL);
+#ifdef __linux__
+        pthread_setname_np(spewer, "vita49");
+#endif
+        /* Wait up to 5 seconds for the first context packet */
+        struct timespec deadline;
+        clock_gettime(CLOCK_REALTIME, &deadline);
+        deadline.tv_sec += 5;
+
+        pthread_mutex_lock(&vita49_ctx_mutex);
+        while (!vita49_ctx_ready) {
+            if (pthread_cond_timedwait(&vita49_ctx_cond, &vita49_ctx_mutex,
+                                        &deadline) != 0)
+                break;  /* timeout */
+        }
+        int got_ctx = vita49_ctx_ready;
+        pthread_mutex_unlock(&vita49_ctx_mutex);
+
+        if (got_ctx) {
+            fprintf(stderr, "vita49: configured from context packet\n");
+        } else {
+            fprintf(stderr, "vita49: no context packet received within 5s, "
+                    "using command-line values\n");
+            /* Validate that we have usable values */
+            if (samp_rate <= 0)
+                errx(1, "VITA 49: no context received and no -r specified");
+            if (center_freq <= 0)
+                errx(1, "VITA 49: no context received and no -c specified");
+        }
+    }
+
     /* Create burst detector and all downmix workers here in the main thread,
      * before the SDR starts. FFTW_MEASURE plan creation can take several
      * seconds without wisdom; doing it here ensures the detector is fully
@@ -1013,10 +1058,7 @@ int main(int argc, char **argv) {
     }
 #endif
     else if (vita49_enabled) {
-        pthread_create(&spewer, NULL, vita49_thread, NULL);
-#ifdef __linux__
-        pthread_setname_np(spewer, "vita49");
-#endif
+        /* Already started above for context auto-detection */
     }
 
     /* Wait for signal */

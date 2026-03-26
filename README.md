@@ -756,22 +756,27 @@ The sample format (`--format`) and sample rate (`-r`) must match what the publis
 
 ### VITA 49 (VRT) Input
 
-Receive IQ samples via VITA 49 / VRT signal data packets over UDP. This enables receiving from SDR platforms that output VITA 49, such as FlexRadio, REDHAWK SCA, or custom VRT sources.
+Receive IQ samples via VITA 49 / VRT signal data packets over UDP. This enables receiving from SDR platforms that output VITA 49, such as FlexRadio, REDHAWK SCA, Sceptre, or custom VRT sources.
 
 ```bash
-# Receive cf32 IQ via VITA 49 on default port (0.0.0.0:4991)
-./iridium-sniffer --vita49 --format=cf32 -r 10000000
+# Auto-configure from VRT context packets (sample rate, frequency, format)
+./iridium-sniffer --vita49
 
 # Specify bind address and port
-./iridium-sniffer --vita49=192.168.1.100:5000 --format=cf32 -r 10000000
+./iridium-sniffer --vita49=192.168.1.100:5000
+
+# Override specific values (context auto-fills the rest)
+./iridium-sniffer --vita49 -c 1626270833
 
 # With web map
-./iridium-sniffer --vita49 --format=cf32 -r 10000000 --web
+./iridium-sniffer --vita49 --web
 ```
 
-The parser accepts VRT signal data packets (type 0x0 and 0x1) and silently skips context and command packets. The `--format` and `-r` must match the IQ sample format within the VRT payload. Sequence gap detection is built in and logged at shutdown.
+**Auto-configuration from context packets:** When the VRT source sends IF context packets (type 0x4), iridium-sniffer automatically extracts sample rate, RF center frequency, and sample format (ci8/ci16/cf32) from the context fields. On startup, the tool waits up to 5 seconds for a context packet before falling back to command-line values or defaults.
 
-No external libraries are required -- VITA 49 header parsing uses only POSIX sockets.
+Command-line flags (`-r`, `-c`, `--format`) override auto-detected values. If `--format` is specified but the context reports a different format, iridium-sniffer exits with an error since mismatched sample formats produce unusable output. Sample rate and center frequency mismatches produce a warning but continue.
+
+The parser accepts VRT signal data packets (type 0x0 and 0x1) with optional VRL framing. Sequence gap detection is built in and logged at shutdown. No external libraries are required -- VITA 49 parsing uses only POSIX sockets.
 
 ## Command Reference
 
@@ -837,6 +842,7 @@ ZMQ:
 
 VITA 49:
     --vita49[=IP:PORT]      receive IQ via VITA 49 (VRT) UDP (default: 0.0.0.0:4991)
+                             auto-detects -r, -c, and format from VRT context packets
 
 Output:
     --file-info=STR         file info string for RAW output (default: auto)
