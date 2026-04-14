@@ -57,6 +57,7 @@
 #include "simd_kernels.h"
 #include "aircraft_db.h"
 #include "basestation.h"
+#include "waypoint_db.h"
 #include <fftw3.h>
 
 /* FFTW planner mutex (defined here, declared in fftw_lock.h) */
@@ -909,6 +910,28 @@ int main(int argc, char **argv) {
         }
     }
 
+    /* Load waypoint database for ACARS position extraction fallback.
+     * Look next to executable first, then in data/ relative to exe. */
+    if (acars_enabled || basestation_enabled) {
+        char wp_path[512];
+        ssize_t exe_len = readlink("/proc/self/exe", wp_path, sizeof(wp_path) - 1);
+        if (exe_len > 0) {
+            wp_path[exe_len] = '\0';
+            char *slash = strrchr(wp_path, '/');
+            if (slash) {
+                /* Try ../data/waypoints.csv (source tree) */
+                snprintf(slash + 1, sizeof(wp_path) - (slash + 1 - wp_path),
+                         "../data/waypoints.csv");
+                if (waypoint_db_load(wp_path) < 0) {
+                    /* Try data/waypoints.csv next to exe */
+                    snprintf(slash + 1, sizeof(wp_path) - (slash + 1 - wp_path),
+                             "data/waypoints.csv");
+                    waypoint_db_load(wp_path);
+                }
+            }
+        }
+    }
+
     if (acars_enabled) {
         acars_init(station_id, (const char **)acars_udp_hosts,
                    acars_udp_ports, acars_udp_count,
@@ -1144,6 +1167,8 @@ int main(int argc, char **argv) {
         basestation_destroy();
         aircraft_db_destroy();
     }
+
+    waypoint_db_destroy();
 
 #ifdef HAVE_ZMQ
     if (zmq_enabled)

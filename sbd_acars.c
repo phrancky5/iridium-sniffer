@@ -754,7 +754,6 @@ static la_type_descriptor const la_DEF_iridium_message = {
     .format_json = iridium_format_json,
     .json_key = "iridium",
 };
-
 static void acars_parse_libacars(const uint8_t *data, int len, int ul,
                                   uint64_t timestamp, double frequency,
                                   float magnitude)
