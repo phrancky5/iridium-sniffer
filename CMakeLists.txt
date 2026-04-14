@@ -4,12 +4,27 @@ project(iridium-sniffer C)
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/Modules" ${CMAKE_MODULE_PATH})
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fno-common -Wall -Wextra -Wno-unused-parameter -std=c99 -Werror=implicit-function-declaration")
+
+set(GPU_PLUGIN_NAME "libiridium-sniffer-gpu.so")
+
 if(UNIX AND NOT APPLE)
   if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm|ARM|aarch64|AARCH64")
     # ARM/AArch64: compiler handles NEON automatically
   else()
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -msse4.1")
   endif()
+endif()
+
+# Include paths for MacOS/Homebrew
+if(APPLE)
+    set(GPU_PLUGIN_NAME "libiridium-sniffer-gpu.dylib")
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm|ARM|aarch64|AARCH64")
+        link_directories(/opt/homebrew/lib)
+        include_directories(/opt/homebrew/include)
+    else()
+        link_directories(/usr/local/lib)
+        include_directories(/usr/local/include)
+    endif()
 endif()
 
 set(CMAKE_C_FLAGS_DEBUG "-ggdb3 -g3 -O0 -fsanitize=address")
@@ -102,8 +117,10 @@ if(USE_OPENCL AND USE_VULKAN)
     message(FATAL_ERROR "USE_OPENCL and USE_VULKAN are mutually exclusive. Choose one.")
 endif()
 
+configure_file(${PROJECT_SOURCE_DIR}/config.h.in ${PROJECT_BINARY_DIR}/config.h)
+
 # Sources
-include_directories(${PROJECT_SOURCE_DIR})
+include_directories(${PROJECT_SOURCE_DIR} ${PROJECT_BINARY_DIR})
 
 set(SOURCES
     ${PROJECT_SOURCE_DIR}/main.c

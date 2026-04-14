@@ -23,6 +23,8 @@
 #include <dlfcn.h>
 #include <fftw3.h>
 
+#include "config.h"
+
 #include "burst_detect.h"
 #include "fftw_lock.h"
 #include "iridium.h"
@@ -188,14 +190,14 @@ static int gpu_plugin_load(burst_detector_t *d)
         if (slash) {
             *slash = '\0';
             snprintf(exe_dir_lib, sizeof(exe_dir_lib),
-                     "%s/libiridium-sniffer-gpu.so", exe_path);
+                     "%s/" GPU_PLUGIN_NAME, exe_path);
         }
     }
 
     const char *names[] = {
         exe_dir_lib[0] ? exe_dir_lib : NULL, /* next to executable */
-        "libiridium-sniffer-gpu.so",          /* standard library path */
-        "./libiridium-sniffer-gpu.so",        /* current directory */
+        GPU_PLUGIN_NAME,                     /* standard library path */
+        "./" GPU_PLUGIN_NAME,                /* current directory */
         NULL
     };
 
