@@ -17,6 +17,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "aircraft_db.h"
 #include "sdr.h"
 #include "sigmf.h"
 #include "simd_kernels.h"
@@ -115,6 +116,9 @@ extern int zmq_sub_enabled;
 extern char *zmq_sub_endpoint;
 extern int vita49_enabled;
 extern char *vita49_endpoint;
+extern int basestation_enabled;
+extern char *basestation_endpoint;
+extern char *aircraft_db_path;
 extern int samp_rate_explicit;
 extern int center_freq_explicit;
 extern int iq_format_explicit;
@@ -204,6 +208,13 @@ static void usage(int exitcode) {
 "    --vita49[=IP:PORT]    receive IQ via VITA 49 (VRT) UDP packets\n"
 "                             (default: 0.0.0.0:4991, auto-detects -r/-c/format\n"
 "                             from VRT context packets if not specified)\n"
+"\n"
+"  BaseStation output:\n"
+"    --basestation[=PORT]     SBS server on PORT (default 30003, tools connect in)\n"
+"    --basestation=HOST:PORT  SBS push to remote host (auto-reconnect)\n"
+"    --aircraft-db=PATH       aircraft database CSV (default: ~/.iridium-sniffer/aircraft.csv)\n"
+"    --update-db              download/update aircraft database and exit\n"
+"\n"
 "    -v, --verbose           verbose output to stderr\n"
 "    -h, --help              show this help\n"
 "    --list                  list available SDR interfaces\n"
@@ -277,6 +288,9 @@ void parse_options(int argc, char **argv) {
         OPT_TIME_SOURCE,
         OPT_SDRPLAY_GAIN,
         OPT_VITA49,
+        OPT_BASESTATION,
+        OPT_AIRCRAFT_DB,
+        OPT_UPDATE_DB,
     };
 
     static const struct option longopts[] = {
@@ -323,6 +337,9 @@ void parse_options(int argc, char **argv) {
         { "time-source",    required_argument, NULL, OPT_TIME_SOURCE },
         { "sdrplay-gain",   required_argument, NULL, OPT_SDRPLAY_GAIN },
         { "vita49",         optional_argument, NULL, OPT_VITA49 },
+        { "basestation",    optional_argument, NULL, OPT_BASESTATION },
+        { "aircraft-db",    required_argument, NULL, OPT_AIRCRAFT_DB },
+        { "update-db",      no_argument,       NULL, OPT_UPDATE_DB },
         { NULL,             0,                 NULL, 0 }
     };
 
@@ -600,6 +617,21 @@ void parse_options(int argc, char **argv) {
                 if (optarg)
                     vita49_endpoint = strdup(optarg);
                 break;
+
+            case OPT_BASESTATION:
+                basestation_enabled = 1;
+                if (optarg)
+                    basestation_endpoint = strdup(optarg);
+                break;
+
+            case OPT_AIRCRAFT_DB:
+                aircraft_db_path = strdup(optarg);
+                break;
+
+            case OPT_UPDATE_DB: {
+                int ret = aircraft_db_update();
+                exit(ret == 0 ? 0 : 1);
+            }
 
             case OPT_SOAPY_SETTING:
 #ifdef HAVE_SOAPYSDR
