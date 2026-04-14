@@ -18,6 +18,9 @@ set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O3 -ggdb3 -g3")
 set(CMAKE_C_FLAGS_RELEASE "-O3")
 set(CMAKE_EXE_LINKER_FLAGS_DEBUG "-fsanitize=address")
 
+set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
 # Build RelWithDebInfo by default
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING
@@ -200,6 +203,9 @@ endif()
 if(LIBACARS_FOUND)
     target_link_libraries(iridium-sniffer PRIVATE ${LIBACARS_LIBRARIES})
     target_include_directories(iridium-sniffer PRIVATE ${LIBACARS_INCLUDE_DIRS})
+    if(LIBACARS_LIBRARY_DIRS)
+        target_link_directories(iridium-sniffer PRIVATE ${LIBACARS_LIBRARY_DIRS})
+    endif()
     target_compile_definitions(iridium-sniffer PRIVATE HAVE_LIBACARS)
     message(STATUS "libacars: enabled (ARINC-622/ADS-C/CPDLC decoding)")
 else()
