@@ -3,10 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>iridium-sniffer — Mission Control NXC2 Edition</title>
+<title>iridium-sniffer — Mission Control v1.1 NXC2 Edition</title>
 
 <!-- Socket.IO from CDN -->
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+<!-- 3D Globe module (CesiumJS + satellite.js loaded on demand from CDN) -->
+<script>window.INTERCEPT_CESIUM_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiIwNWNiNDg1Mi00YTcxLTQyMjMtYWUxYS1lNWYxMWU0ZDdjYjAiLCJpZCI6NDAwMDQ1LCJpYXQiOjE3NzI5MzI5ODB9.WspFvVgC00Nz-pYLkFKN8NxVv3SqY1dzY13OXVpQiDE';</script>
+<script src="/static/js/iridium-globe.js"></script>
 <!-- Chart.js from CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" crossorigin="anonymous"></script>
 <script>
@@ -366,6 +369,30 @@ body::after {
   box-shadow: var(--glow-cyan);
 }
 
+.btn-wireshark {
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  color: var(--accent);
+  padding: 3px 8px;
+  font-size: 10px;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-wireshark:hover {
+  border-color: var(--accent);
+  box-shadow: var(--glow-sm);
+}
+
+.btn-wireshark:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
@@ -668,6 +695,78 @@ body::after {
   margin-top: 2px;
 }
 
+/* ---- ACARS feed (replaces constellation when ACARS enabled) ---- */
+.acars-feed-container {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
+}
+.acars-feed-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background: var(--bg-card-alt);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.acars-feed-header .title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+.acars-feed-header .count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.acars-feed-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.55;
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 0 15px rgba(0, 50, 50, 0.2);
+  background: linear-gradient(180deg, rgb(13, 32, 32) 0%, rgba(17, 49, 49, 0.81) 50%);
+}
+.acars-msg {
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  border-left: 3px solid var(--cyan);
+  background: rgba(6, 182, 212, 0.04);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-primary);
+}
+.acars-msg.sbd {
+  border-left-color: var(--orange);
+  background: rgba(251, 146, 60, 0.04);
+}
+.acars-msg .acars-ts {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+.acars-msg .acars-dir {
+  font-weight: 700;
+  color: var(--green);
+}
+.acars-msg .acars-dir.dl {
+  color: var(--orange);
+}
+.acars-msg .acars-reg {
+  color: var(--cyan);
+  font-weight: 600;
+}
+.acars-msg .acars-label-tag {
+  color: var(--purple);
+}
+
 /* ---- Decoded data table ---- */
 .decoded-container {
   position: absolute;
@@ -675,6 +774,17 @@ body::after {
   background: var(--bg-primary);
   overflow-y: auto;
   padding: 0;
+}
+
+/* ---- 3D Globe ---- */
+.globe-container {
+  position: absolute;
+  inset: 0;
+  background: #07071a;
+}
+.globe-container .cesium-viewer {
+  width: 100% !important;
+  height: 100% !important;
 }
 .decoded-container::-webkit-scrollbar { width: 6px; }
 .decoded-container::-webkit-scrollbar-track { background: transparent; }
@@ -777,7 +887,7 @@ body::after {
     <div class="logo-icon"></div>
     <div>
       <div class="header-title">IRIDIUM SNIFFER</div>
-      <div class="header-sub">MISSION CONTROL v1.0 — NXC2 EDITION</div>
+      <div class="header-sub">MISSION CONTROL v1.1 — NXC2 EDITION</div>
     </div>
   </div>
   <div id="statusBadge" class="status-badge offline" title="Connection status. READY = backend idle, waiting for START. RUNNING = iridium-sniffer process is active.">
@@ -979,7 +1089,10 @@ body::after {
       </div>
       <div class="toggle-row" title="Send decoded IDA frames as GSMTAP/LAPDm UDP packets to Wireshark on 127.0.0.1:4729. Replaces iridium-parser.py -m gsmtap pipeline. Maps to --gsmtap.">
         <span class="toggle-label">GSMTAP → Wireshark</span>
-        <label class="toggle"><input type="checkbox" id="gsmtap"><span class="toggle-track"></span><span class="toggle-knob"></span></label>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <button id="btnWireshark" class="btn-wireshark" onclick="launchWireshark()" style="display:none;" title="Launch Wireshark listening on UDP port 4729 for GSMTAP packets">&#x1F4E1; Wireshark</button>
+          <label class="toggle"><input type="checkbox" id="gsmtap" onchange="toggleWiresharkBtn()"><span class="toggle-track"></span><span class="toggle-knob"></span></label>
+        </div>
       </div>
       <div class="toggle-row" title="Decode IDA frames internally, output IDA: lines with LCW headers (maint/acchl/hndof sub-types). Enables sub-type filtering in Decoded Data tab. Maps to --parsed.">
         <span class="toggle-label">Parsed IDA</span>
@@ -1053,8 +1166,9 @@ body::after {
       <div class="tab active" data-tab="raw" onclick="switchTab(this)" title="Live stream of every RAW line from iridium-sniffer stdout. Shows the raw demodulated output exactly as piped to iridium-toolkit.">RAW Output</div>
       <div class="tab" data-tab="log" onclick="switchTab(this)" title="stderr output: 1 Hz stats lines, verbose diagnostics (if -v enabled), and GUI system messages (start/stop/errors).">System Log</div>
       <div class="tab" data-tab="spectrum" onclick="switchTab(this)" title="Live RF spectrum showing detected burst activity across the tuned frequency band. Hover for details. Color = confidence, shape = frame type.">Spectrum</div>
-      <div class="tab" data-tab="constellation" onclick="switchTab(this)" title="DQPSK constellation diagram showing demodulation quality. Tight clusters = clean signal. Scatter radius reflects confidence %.">Constellation</div>
+      <div class="tab" data-tab="constellation" onclick="switchTab(this)" title="DQPSK constellation diagram (or live ACARS feed when ACARS is enabled)."><span id="constTabLabel">Constellation</span></div>
       <div class="tab" data-tab="decoded" onclick="switchTab(this)" title="Structured table of every decoded frame with type classification, filtering, SNR, confidence, and timing. Enable Parsed IDA for sub-type detail.">Decoded Data</div>
+      <div class="tab" data-tab="globe3d" onclick="switchTab(this)" title="3D satellite constellation visualization using real CelesTrak TLE data. Shows all 66 Iridium NEXT satellites, orbit tracks, and beam coverage.">&#x1F6F0;&#xFE0F; 3D Globe</div>
     </div>
 
     <!-- Terminal panes -->
@@ -1072,17 +1186,25 @@ body::after {
         <div class="spec-tooltip" id="specTooltip"></div>
       </div>
 
-      <!-- Constellation display -->
+      <!-- Constellation / ACARS feed display -->
       <div class="constellation-container" id="tabConstellation" style="display:none;">
-        <div class="constellation-canvas-wrap" title="DQPSK constellation I/Q scatter plot. 4 ideal points (00, 01, 11, 10). Scatter = noise. Green = high confidence, orange = medium, red = low.">
+        <div class="constellation-canvas-wrap" id="constCanvasWrap" title="DQPSK constellation I/Q scatter plot. 4 ideal points (00, 01, 11, 10). Scatter = noise. Green = high confidence, orange = medium, red = low.">
           <canvas id="constellationCanvas" width="380" height="380"></canvas>
         </div>
-        <div class="constellation-sidebar">
+        <div class="constellation-sidebar" id="constSidebar">
           <div class="const-stat" title="Number of recent frames displayed in the constellation (max 200, oldest fade out)."><div class="val green" id="constFrames">0</div><div class="lbl">Frames</div></div>
           <div class="const-stat" title="Average demodulation confidence across displayed frames. Higher = cleaner signal."><div class="val cyan" id="constAvgConf">—</div><div class="lbl">Avg Conf %</div></div>
           <div class="const-stat" title="Average signal-to-noise ratio across displayed frames in dB."><div class="val orange" id="constAvgSnr">—</div><div class="lbl">Avg SNR dB</div></div>
           <div class="const-stat" title="Highest confidence % seen among the displayed frames."><div class="val purple" id="constBestConf">—</div><div class="lbl">Best Conf %</div></div>
           <div class="const-stat" title="Average symbol count per frame. IRA ≈ 62, IDA ≈ 179, IBC ≈ 220+."><div class="val blue" id="constSymRate">—</div><div class="lbl">Symbols</div></div>
+        </div>
+        <!-- ACARS feed (shown instead of constellation when ACARS is enabled) -->
+        <div class="acars-feed-container" id="acarsFeedPanel" style="display:none;">
+          <div class="acars-feed-header">
+            <span class="title">ACARS / SBD Feed</span>
+            <span class="count" id="acarsFeedCount">0 messages</span>
+          </div>
+          <div class="acars-feed-scroll" id="acarsFeedScroll"></div>
         </div>
       </div>
 
@@ -1116,6 +1238,65 @@ body::after {
           </thead>
           <tbody id="decodedBody"></tbody>
         </table>
+      </div>
+
+      <!-- 3D Globe -->
+      <div class="globe-container" id="tabGlobe3d" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;background:var(--bg-card-alt);border-bottom:1px solid var(--border);flex-wrap:wrap;gap:4px;">
+          <div style="display:flex;gap:8px;align-items:center;">
+            <label style="color:var(--text-dim);font-size:11px;display:flex;align-items:center;gap:3px;cursor:pointer;" title="Enable/disable the 3D globe renderer. Disabling frees GPU resources.">
+              <input type="checkbox" id="globeEnabled" checked onchange="toggleGlobeEnabled(this.checked)">
+              <span style="font-weight:600;">Globe</span>
+            </label>
+            <span id="globeStatus" style="color:var(--text-dim);font-size:12px;">Click to load globe</span>
+            <span id="globeTleInfo" style="color:var(--text-dim);font-size:11px;"></span>
+          </div>
+          <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
+            <select id="globeMode" onchange="updateGlobeMode()" style="padding:2px 6px;background:var(--bg-primary);color:var(--text-dim);border:1px solid var(--border);border-radius:4px;font-size:11px;">
+              <option value="live">Live</option>
+              <option value="session">Session Time</option>
+            </select>
+            <select id="globeMapStyle" onchange="setGlobeMapStyle(this.value)" style="padding:2px 6px;background:var(--bg-primary);color:var(--text-dim);border:1px solid var(--border);border-radius:4px;font-size:11px;">
+              <option value="satellite">Satellite</option>
+              <option value="osm">OpenStreetMap</option>
+              <option value="dark">Dark</option>
+            </select>
+            <label style="color:var(--text-dim);font-size:11px;display:flex;align-items:center;gap:2px;">
+              <input type="checkbox" id="globeBeams" checked onchange="IridiumGlobe.toggleBeams(this.checked)"> Beams
+            </label>
+            <label style="color:var(--text-dim);font-size:11px;display:flex;align-items:center;gap:2px;">
+              <input type="checkbox" id="globeOrbits" checked onchange="IridiumGlobe.toggleOrbits(this.checked)"> Orbits
+            </label>
+            <span style="border-left:1px solid var(--border);height:16px;margin:0 2px;"></span>
+            <label style="color:var(--cyan);font-size:11px;display:flex;align-items:center;gap:2px;" title="Show live beam footprints from web map data">
+              <input type="checkbox" id="wmBeams" onchange="toggleWebMapLayer('beams',this.checked)"> WM Beams
+            </label>
+            <label style="color:var(--cyan);font-size:11px;display:flex;align-items:center;gap:2px;" title="Adjust WM Beam fill transparency">
+              <input type="range" id="wmBeamAlpha" min="0" max="100" value="12"
+                style="width:60px;height:14px;accent-color:var(--cyan);cursor:pointer;"
+                oninput="updateWmBeamAlpha(this.value)">
+              <span id="wmBeamAlphaVal" style="min-width:28px;">12%</span>
+            </label>
+            <label style="color:var(--green);font-size:11px;display:flex;align-items:center;gap:2px;" title="Show mobile terminal positions">
+              <input type="checkbox" id="wmMT" onchange="toggleWebMapLayer('mt',this.checked)"> MT
+            </label>
+            <label style="color:var(--orange);font-size:11px;display:flex;align-items:center;gap:2px;" title="Show ACARS aircraft positions and tracks">
+              <input type="checkbox" id="wmAircraft" onchange="toggleWebMapLayer('aircraft',this.checked)"> Aircraft
+            </label>
+            <label style="color:var(--purple);font-size:11px;display:flex;align-items:center;gap:2px;" title="Show receiver Doppler position">
+              <input type="checkbox" id="wmRx" onchange="toggleWebMapLayer('rx',this.checked)"> Receiver
+            </label>
+            <label style="color:var(--yellow);font-size:11px;display:flex;align-items:center;gap:2px;" title="Show satellite RA (orbital) positions from web map">
+              <input type="checkbox" id="wmSats" onchange="toggleWebMapLayer('sats',this.checked)"> Sat Pos
+            </label>
+            <span id="wmStatus" style="font-size:10px;color:var(--green);min-width:60px;"></span>
+            <button onclick="IridiumGlobe.resetView()" title="Reset view to observer location" 
+              style="padding:2px 8px;background:var(--bg-card-alt);color:var(--text-dim);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:13px;">&#x2302;</button>
+            <button onclick="refreshGlobeTles()" title="Force refresh TLEs from CelesTrak" 
+              style="padding:2px 8px;background:var(--bg-card-alt);color:var(--text-dim);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:11px;">&#x1F504; TLE</button>
+          </div>
+        </div>
+        <div id="globeContainer" style="width:100%;height:calc(100% - 32px);position:relative;"></div>
       </div>
     </div>
 
@@ -1305,8 +1486,14 @@ function switchTab(el) {
   document.getElementById('tabSpectrum').style.display = tab === 'spectrum' ? 'block' : 'none';
   document.getElementById('tabConstellation').style.display = tab === 'constellation' ? 'flex' : 'none';
   document.getElementById('tabDecoded').style.display = tab === 'decoded' ? 'block' : 'none';
+  document.getElementById('tabGlobe3d').style.display = tab === 'globe3d' ? 'block' : 'none';
   if (tab === 'spectrum') resizeSpectrum();
-  if (tab === 'constellation') drawConstellation();
+  if (tab === 'constellation') {
+    updateConstellationMode();
+    if (isAcarsMode()) renderAcarsFeed();
+    else drawConstellation();
+  }
+  if (tab === 'globe3d') loadGlobe();
 }
 
 function toggleMode() {
@@ -1327,6 +1514,31 @@ function toggleDeviceGains() {
   } else {
     document.getElementById('centerFreq').value = '1622000000';
     document.getElementById('sampleRate').value = '10000000';
+  }
+}
+
+// ---- Wireshark button ----
+
+function toggleWiresharkBtn() {
+  const btn = document.getElementById('btnWireshark');
+  btn.style.display = document.getElementById('gsmtap').checked ? '' : 'none';
+}
+
+async function launchWireshark() {
+  const btn = document.getElementById('btnWireshark');
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/api/wireshark', { method: 'POST' });
+    const data = await resp.json();
+    if (data.error) {
+      addLine('termLog', 'Wireshark: ' + data.error, 'line-error');
+    } else {
+      addLine('termLog', 'Wireshark launched (GSMTAP filter: udp port 4729)', 'line-system');
+    }
+  } catch (e) {
+    addLine('termLog', 'Failed to launch Wireshark: ' + e, 'line-error');
+  } finally {
+    setTimeout(() => { btn.disabled = false; }, 2000);
   }
 }
 
@@ -1442,6 +1654,10 @@ async function startSniffer() {
   decodedVisible = 0;
   specPoints.length = 0;
   constFrames.length = 0;
+  acarsFeedMessages.length = 0;
+  document.getElementById('acarsFeedScroll').innerHTML = '';
+  document.getElementById('acarsFeedCount').textContent = '0 messages';
+  updateConstellationMode();
   if (liveChart && liveChart.data) {
     liveChart.data.labels = [];
     liveChart.data.datasets[0].data = [];
@@ -1686,6 +1902,66 @@ const constCtx = constCanvas.getContext('2d');
 // Ring buffer of recent frame constellation data
 const constFrames = [];
 const CONST_MAX_FRAMES = 200;
+
+// ---- ACARS feed state ----
+const ACARS_FEED_MAX = 500;
+const acarsFeedMessages = [];
+
+function isAcarsMode() {
+  return document.getElementById('acars').checked || document.getElementById('acarsJson').checked;
+}
+
+function updateConstellationMode() {
+  const acarsOn = isAcarsMode();
+  document.getElementById('constCanvasWrap').style.display = acarsOn ? 'none' : '';
+  document.getElementById('constSidebar').style.display = acarsOn ? 'none' : '';
+  document.getElementById('acarsFeedPanel').style.display = acarsOn ? '' : 'none';
+  document.getElementById('constTabLabel').textContent = acarsOn ? 'ACARS Feed' : 'Constellation';
+}
+
+function addAcarsFeedMessage(text) {
+  const isSbd = text.startsWith('SBD:');
+  acarsFeedMessages.push({ text: text, sbd: isSbd, ts: Date.now() });
+  if (acarsFeedMessages.length > ACARS_FEED_MAX) acarsFeedMessages.shift();
+
+  // Update count
+  document.getElementById('acarsFeedCount').textContent = acarsFeedMessages.length + ' messages';
+
+  // Render if visible
+  const panel = document.getElementById('acarsFeedPanel');
+  if (panel.style.display === 'none') return;
+
+  const scroll = document.getElementById('acarsFeedScroll');
+  const wasAtBottom = scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight - 30;
+
+  const div = document.createElement('div');
+  div.className = 'acars-msg' + (isSbd ? ' sbd' : '');
+  div.textContent = text;
+  scroll.appendChild(div);
+
+  // Trim DOM
+  while (scroll.children.length > ACARS_FEED_MAX) scroll.removeChild(scroll.firstChild);
+
+  if (wasAtBottom) scroll.scrollTop = scroll.scrollHeight;
+}
+
+// Listen to ACARS toggle changes to update the tab dynamically
+document.getElementById('acars').addEventListener('change', updateConstellationMode);
+document.getElementById('acarsJson').addEventListener('change', updateConstellationMode);
+
+function renderAcarsFeed() {
+  const scroll = document.getElementById('acarsFeedScroll');
+  scroll.innerHTML = '';
+  for (const msg of acarsFeedMessages) {
+    const div = document.createElement('div');
+    div.className = 'acars-msg' + (msg.sbd ? ' sbd' : '');
+    div.textContent = msg.text;
+    scroll.appendChild(div);
+  }
+  scroll.scrollTop = scroll.scrollHeight;
+  document.getElementById('acarsFeedCount').textContent = acarsFeedMessages.length + ' messages';
+}
+
 const CONST_IDEAL = [
   { i:  1, q:  1 },  // 45°
   { i: -1, q:  1 },  // 135°
@@ -1936,10 +2212,11 @@ socket.on('ida_frame', (data) => {
   addDecodedAcarsRow(data.data, data.type);
 });
 
-// Also catch ACARS/SBD lines for decoded tab
+// Also catch ACARS/SBD lines for decoded tab + ACARS feed panel
 socket.on('raw_line', (data) => {
   if (data.data.startsWith('ACARS:') || data.data.startsWith('SBD:')) {
     addDecodedAcarsRow(data.data, 'ACARS');
+    addAcarsFeedMessage(data.data);
   }
 });
 
@@ -1952,13 +2229,472 @@ window.addEventListener('resize', () => {
 
 // ---- Init ----
 document.addEventListener('DOMContentLoaded', () => {
-  addLine('termLog', 'iridium-sniffer Mission Control NXC2 Edition ready — forked from alphafox02/iridium-sniffer', 'line-system');
+  addLine('termLog', 'iridium-sniffer Mission Control v1.1 — NXC2 Edition ready', 'line-system');
   addLine('termLog', 'Scanning for SDR devices...', 'line-system');
   // Auto-scan for devices on load
   scanDevices();
-  // Initialize constellation
+  // Initialize constellation / ACARS feed mode
+  updateConstellationMode();
   drawConstellation();
 });
+
+/* ============================================================
+ * 3D Globe Tab
+ * ============================================================ */
+let globeLoaded = false;
+
+async function loadGlobe() {
+    if (globeLoaded || globeDisabledByUser) return;
+    const container = document.getElementById('globeContainer');
+    if (!container) return;
+
+    const statusEl = document.getElementById('globeStatus');
+    if (statusEl) statusEl.textContent = '\u23F3 Loading CesiumJS (~4 MB)\u2026';
+
+    try {
+        const mode = document.getElementById('globeMode').value;
+        const epochMs = mode === 'session' ? _getSessionEpochMs() : null;
+        const data = await IridiumGlobe.createFromTLEs(container, epochMs, 60);
+        globeLoaded = true;
+
+        if (statusEl) {
+            const count = data.satellites ? data.satellites.length : 0;
+            const vis = data.visible_count || 0;
+            statusEl.textContent = count + ' satellites (' + vis + ' visible)';
+            statusEl.style.color = 'var(--green)';
+        }
+
+        const tleInfo = document.getElementById('globeTleInfo');
+        if (tleInfo && data.tle_age_min != null) {
+            const age = Math.round(data.tle_age_min);
+            tleInfo.textContent = 'TLE age: ' + (age < 60 ? age + 'min' : Math.round(age/60) + 'h');
+            tleInfo.style.color = age > 360 ? 'var(--orange)' : 'var(--text-dim)';
+        }
+
+        IridiumGlobe.startAnimation(null, 120, function(animData) {
+            if (statusEl && animData.visible_count != null) {
+                statusEl.textContent = animData.satellites.length + ' satellites (' + animData.visible_count + ' visible)';
+            }
+        });
+
+    } catch (e) {
+        console.error('Globe load failed:', e);
+        if (statusEl) {
+            statusEl.textContent = '\u274C ' + e.message;
+            statusEl.style.color = 'var(--red)';
+        }
+    }
+}
+
+function _getSessionEpochMs() {
+    return null;
+}
+
+function updateGlobeMode() {
+    const mode = document.getElementById('globeMode').value;
+    if (!globeLoaded) return;
+    if (mode === 'live') {
+        IridiumGlobe.recomputeAt(Date.now());
+    } else {
+        const epoch = _getSessionEpochMs();
+        if (epoch) IridiumGlobe.recomputeAt(epoch);
+    }
+}
+
+function setGlobeMapStyle(style) {
+    if (typeof IridiumGlobe !== 'undefined') IridiumGlobe.setMapStyle(style);
+}
+
+async function refreshGlobeTles() {
+    const statusEl = document.getElementById('globeStatus');
+    if (statusEl) statusEl.textContent = '\uD83D\uDD04 Refreshing TLEs\u2026';
+    try {
+        const res = await fetch('/api/tles/refresh', { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'success') {
+            if (statusEl) statusEl.textContent = '\u2705 ' + data.message;
+            if (globeLoaded) {
+                IridiumGlobe.dispose();
+                globeLoaded = false;
+                loadGlobe();
+            }
+        } else {
+            if (statusEl) statusEl.textContent = '\u274C ' + (data.message || 'Failed');
+        }
+    } catch (e) {
+        if (statusEl) statusEl.textContent = '\u274C ' + e.message;
+    }
+}
+
+socket.on('position', function(pos) {
+    console.log('Doppler position:', pos);
+    fetch('/api/observer', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(pos),
+    });
+});
+
+/* ============================================================
+ * Globe Toggle
+ * ============================================================ */
+let globeDisabledByUser = false;
+
+function toggleGlobeEnabled(enabled) {
+    if (!enabled) {
+        globeDisabledByUser = true;
+        if (globeLoaded && typeof IridiumGlobe !== 'undefined') {
+            IridiumGlobe.stopAnimation();
+            IridiumGlobe.dispose();
+            globeLoaded = false;
+        }
+        stopWebMapPolling();
+        const c = document.getElementById('globeContainer');
+        if (c) c.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;color:var(--text-dim);font-size:14px;">Globe disabled — check the toggle to enable</div>';
+        const s = document.getElementById('globeStatus');
+        if (s) { s.textContent = 'Disabled'; s.style.color = 'var(--text-dim)'; }
+    } else {
+        globeDisabledByUser = false;
+        const c = document.getElementById('globeContainer');
+        if (c) c.innerHTML = '';
+        loadGlobe();
+    }
+}
+
+/* ============================================================
+ * Web Map Data Overlay on 3D Globe
+ * ============================================================ */
+let _wmPollTimer = null;
+let _wmLayers = { beams: false, mt: false, aircraft: false, rx: false, sats: false };
+let _wmEntities = { beams: [], mt: [], aircraft: [], rx: null, sats: [] };
+let _wmLastCount = 0;
+
+function toggleWebMapLayer(layer, enabled) {
+    _wmLayers[layer] = enabled;
+    const anyActive = Object.values(_wmLayers).some(v => v);
+    if (anyActive && !_wmPollTimer && globeLoaded) {
+        startWebMapPolling();
+    }
+    if (!anyActive) {
+        stopWebMapPolling();
+        _updateWmStatus('');
+    }
+    if (!enabled) {
+        clearWebMapEntities(layer);
+    }
+    // Trigger immediate fetch when enabling
+    if (enabled && globeLoaded) {
+        fetchWebMapState();
+    }
+}
+
+function startWebMapPolling() {
+    if (_wmPollTimer) return;
+    console.log('[WebMap] Starting web map data polling (2s interval)');
+    _updateWmStatus('⏳ Connecting…');
+    fetchWebMapState();
+    _wmPollTimer = setInterval(fetchWebMapState, 2000);
+}
+
+function stopWebMapPolling() {
+    if (_wmPollTimer) {
+        clearInterval(_wmPollTimer);
+        _wmPollTimer = null;
+        console.log('[WebMap] Stopped polling');
+    }
+}
+
+function _updateWmStatus(msg) {
+    var el = document.getElementById('wmStatus');
+    if (el) el.textContent = msg;
+}
+
+function clearWebMapEntities(layer) {
+    if (!globeLoaded || typeof IridiumGlobe === 'undefined') return;
+    var viewer = IridiumGlobe.getViewer ? IridiumGlobe.getViewer() : null;
+    if (!viewer || viewer.isDestroyed()) return;
+    if (layer === 'rx') {
+        if (_wmEntities.rx) { viewer.entities.remove(_wmEntities.rx); _wmEntities.rx = null; }
+    } else {
+        (_wmEntities[layer] || []).forEach(function(e) { viewer.entities.remove(e); });
+        _wmEntities[layer] = [];
+    }
+}
+
+function clearAllWebMapEntities() {
+    ['beams', 'mt', 'aircraft', 'rx', 'sats'].forEach(clearWebMapEntities);
+}
+
+async function fetchWebMapState() {
+    if (!globeLoaded || typeof IridiumGlobe === 'undefined') return;
+    var viewer = IridiumGlobe.getViewer ? IridiumGlobe.getViewer() : null;
+    if (!viewer || viewer.isDestroyed()) return;
+    try {
+        var resp = await fetch('/api/webmap/state');
+        if (!resp.ok) {
+            var errData = await resp.json().catch(function() { return {}; });
+            console.warn('[WebMap] Fetch failed:', resp.status, errData.error || '');
+            _updateWmStatus('⚠ ' + (errData.error || 'HTTP ' + resp.status));
+            return;
+        }
+        var data = await resp.json();
+        if (data.error) {
+            console.warn('[WebMap] Server error:', data.error);
+            _updateWmStatus('⚠ ' + data.error);
+            return;
+        }
+        renderWebMapData(viewer, data);
+    } catch (e) {
+        console.warn('[WebMap] Fetch exception:', e.message);
+        _updateWmStatus('⚠ ' + e.message);
+    }
+}
+
+var _wmBeamAlpha = 0.12;
+function updateWmBeamAlpha(val) {
+    _wmBeamAlpha = parseInt(val, 10) / 100;
+    var lbl = document.getElementById('wmBeamAlphaVal');
+    if (lbl) lbl.textContent = val + '%';
+    var Cesium = window.Cesium;
+    if (!Cesium || !_wmEntities.beams) return;
+    _wmEntities.beams.forEach(function(e) {
+        if (e.ellipse) {
+            e.ellipse.material = Cesium.Color.RED.withAlpha(_wmBeamAlpha);
+            e.ellipse.outlineColor = Cesium.Color.RED.withAlpha(Math.min(_wmBeamAlpha + 0.73, 1.0));
+        }
+        if (e.point) e.point.color = Cesium.Color.RED.withAlpha(Math.min(_wmBeamAlpha + 0.78, 1.0));
+    });
+}
+
+function renderWebMapData(viewer, data) {
+    var Cesium = window.Cesium;
+    if (!Cesium) return;
+    var totalEntities = 0;
+
+    // -- Beam footprints --
+    if (_wmLayers.beams && data.beams) {
+        clearWebMapEntities('beams');
+        data.beams.forEach(function(b) {
+            var e = viewer.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(b.lon, b.lat, 0),
+                ellipse: {
+                    semiMajorAxis: 350000,
+                    semiMinorAxis: 350000,
+                    material: Cesium.Color.RED.withAlpha(_wmBeamAlpha),
+                    outline: true,
+                    outlineColor: Cesium.Color.RED.withAlpha(Math.min(_wmBeamAlpha + 0.73, 1.0)),
+                    outlineWidth: 2,
+                    height: 0,
+                },
+                point: {
+                    pixelSize: 6,
+                    color: Cesium.Color.RED.withAlpha(Math.min(_wmBeamAlpha + 0.78, 1.0)),
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                },
+                label: {
+                    text: 'B' + b.beam + '/S' + b.sat,
+                    font: '11px monospace',
+                    fillColor: Cesium.Color.RED,
+                    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                    outlineColor: Cesium.Color.BLACK,
+                    outlineWidth: 2,
+                    verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                    pixelOffset: new Cesium.Cartesian2(0, -10),
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                    scale: 1.0,
+                },
+                _meta: { type: 'beam', data: b },
+            });
+            _wmEntities.beams.push(e);
+        });
+        totalEntities += data.beams.length;
+    }
+
+    // -- MT phone/terminal positions --
+    if (_wmLayers.mt && data.mt) {
+        clearWebMapEntities('mt');
+        data.mt.forEach(function(m) {
+            var e = viewer.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(m.lon, m.lat, (m.alt || 0) * 1000),
+                point: {
+                    pixelSize: 10,
+                    color: Cesium.Color.ORANGE,
+                    outlineColor: Cesium.Color.DARKORANGE,
+                    outlineWidth: 2,
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                },
+                label: {
+                    text: 'MT',
+                    font: '11px monospace',
+                    fillColor: Cesium.Color.ORANGE,
+                    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                    outlineColor: Cesium.Color.BLACK,
+                    outlineWidth: 2,
+                    verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                    pixelOffset: new Cesium.Cartesian2(0, -8),
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                    scale: 1.0,
+                },
+                _meta: { type: 'mt', data: m },
+            });
+            _wmEntities.mt.push(e);
+        });
+        totalEntities += data.mt.length;
+    }
+
+    // -- Aircraft (ACARS) --
+    if (_wmLayers.aircraft && data.aircraft) {
+        clearWebMapEntities('aircraft');
+        data.aircraft.forEach(function(ac) {
+            if (!ac.fixes || ac.fixes.length === 0) return;
+            var lastFix = ac.fixes[ac.fixes.length - 1];
+            var altMeters = (lastFix.alt || 0) * 0.3048;
+            var label = (ac.flight || ac.reg || '?').trim();
+
+            var e = viewer.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(lastFix.lon, lastFix.lat, altMeters),
+                billboard: {
+                    image: _makeAircraftIcon(),
+                    width: 24,
+                    height: 24,
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                },
+                label: {
+                    text: label + (lastFix.alt ? ' FL' + Math.round(lastFix.alt / 100) : ''),
+                    font: '12px monospace',
+                    fillColor: Cesium.Color.CYAN,
+                    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                    outlineColor: Cesium.Color.BLACK,
+                    outlineWidth: 2,
+                    verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                    pixelOffset: new Cesium.Cartesian2(14, -4),
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                },
+                _meta: { type: 'aircraft', data: { label: label, reg: ac.reg, flight: ac.flight, lat: lastFix.lat, lon: lastFix.lon, alt: lastFix.alt, fixes: ac.fixes.length } },
+            });
+            _wmEntities.aircraft.push(e);
+
+            if (ac.fixes.length >= 2) {
+                var positions = ac.fixes.map(function(f) {
+                    return Cesium.Cartesian3.fromDegrees(f.lon, f.lat, (f.alt || 0) * 0.3048);
+                });
+                var track = viewer.entities.add({
+                    polyline: {
+                        positions: positions,
+                        width: 3,
+                        material: Cesium.Color.CYAN.withAlpha(0.7),
+                        clampToGround: false,
+                    }
+                });
+                _wmEntities.aircraft.push(track);
+            }
+        });
+        totalEntities += data.aircraft.length;
+    }
+
+    // -- Receiver (Doppler) position --
+    if (_wmLayers.rx && data.rx) {
+        clearWebMapEntities('rx');
+        _wmEntities.rx = viewer.entities.add({
+            position: Cesium.Cartesian3.fromDegrees(data.rx.lon, data.rx.lat, 0),
+            point: {
+                pixelSize: 14,
+                color: Cesium.Color.fromCssColorString('#a855f7'),
+                outlineColor: Cesium.Color.WHITE,
+                outlineWidth: 3,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            },
+            label: {
+                text: '📡 RX (HDOP ' + (data.rx.hdop || '?') + ')',
+                font: '12px monospace',
+                fillColor: Cesium.Color.fromCssColorString('#a855f7'),
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                outlineColor: Cesium.Color.BLACK,
+                outlineWidth: 2,
+                verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                pixelOffset: new Cesium.Cartesian2(0, -14),
+                disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            },
+            _meta: { type: 'receiver', data: data.rx },
+        });
+        totalEntities++;
+    }
+
+    // -- Satellite RA positions from web map --
+    if (_wmLayers.sats && data.ra) {
+        clearWebMapEntities('sats');
+        var satMap = {};
+        data.ra.forEach(function(r) {
+            if (!satMap[r.sat] || r.t > satMap[r.sat].t) {
+                satMap[r.sat] = r;
+            }
+        });
+        var satKeys = Object.keys(satMap);
+        Object.values(satMap).forEach(function(r) {
+            var altMeters = (r.alt || 780) * 1000;
+            var e = viewer.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(r.lon, r.lat, altMeters),
+                point: {
+                    pixelSize: 8,
+                    color: Cesium.Color.YELLOW,
+                    outlineColor: Cesium.Color.DARKORANGE,
+                    outlineWidth: 1,
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                },
+                label: {
+                    text: 'S' + r.sat,
+                    font: '10px monospace',
+                    fillColor: Cesium.Color.YELLOW,
+                    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                    outlineColor: Cesium.Color.BLACK,
+                    outlineWidth: 2,
+                    verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                    pixelOffset: new Cesium.Cartesian2(0, -8),
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                    scale: 0.9,
+                },
+                _meta: { type: 'satpos', data: r },
+            });
+            _wmEntities.sats.push(e);
+        });
+        totalEntities += satKeys.length;
+    }
+
+    // Update status
+    _wmLastCount = totalEntities;
+    var parts = [];
+    if (data.beams && data.beams.length > 0) parts.push('B:' + data.beams.length);
+    if (data.mt && data.mt.length > 0) parts.push('MT:' + data.mt.length);
+    if (data.aircraft && data.aircraft.length > 0) parts.push('AC:' + data.aircraft.length);
+    if (data.rx) parts.push('RX');
+    if (data.ra && data.ra.length > 0) parts.push('RA:' + data.ra.length);
+    _updateWmStatus(parts.length > 0 ? '● ' + parts.join(' ') : '● No data');
+
+    // Filter TLE-based globe satellites to only those actually sighted
+    if (data.sats && data.sats.length > 0 && typeof IridiumGlobe !== 'undefined') {
+        var sightedIds = data.sats.map(function(s) { return s.id; });
+        IridiumGlobe.setSightedSatellites(sightedIds);
+    } else if (typeof IridiumGlobe !== 'undefined') {
+        IridiumGlobe.setSightedSatellites(null);  // no data — show all
+    }
+}
+
+// Small aircraft icon as a data URL (avoids external image dependency)
+let _aircraftIconUrl = null;
+function _makeAircraftIcon() {
+    if (_aircraftIconUrl) return _aircraftIconUrl;
+    var c = document.createElement('canvas');
+    c.width = 24; c.height = 24;
+    var ctx = c.getContext('2d');
+    ctx.fillStyle = '#00e5ff';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(12, 2); ctx.lineTo(22, 18); ctx.lineTo(12, 14); ctx.lineTo(2, 18); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    _aircraftIconUrl = c.toDataURL();
+    return _aircraftIconUrl;
+}
 </script>
 
 </body>

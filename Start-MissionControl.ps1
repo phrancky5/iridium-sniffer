@@ -16,8 +16,8 @@ $ErrorActionPreference = "Stop"
 $GuiPath = "/mnt/f/HAMAPPS/iridium-sniffer-master/iridium-sniffer-master/gui"
 
 Write-Host ""
-Write-Host "  IRIDIUM SNIFFER — Mission Control" -ForegroundColor Cyan
-Write-Host "  ==================================" -ForegroundColor DarkCyan
+Write-Host "  IRIDIUM SNIFFER — Mission Control v1.3" -ForegroundColor Cyan
+Write-Host "  ========================================" -ForegroundColor DarkCyan
 Write-Host ""
 
 # Check WSL is available

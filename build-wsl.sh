@@ -67,6 +67,75 @@ sudo apt-get install -y --no-install-recommends \
     pkg-config \
     libfftw3-dev
 
+# OpenCL headers for GPU-accelerated burst detection (optional but recommended)
+GPU_PACKAGES=""
+for pkg in opencl-headers ocl-icd-opencl-dev; do
+    if apt-cache show "$pkg" >/dev/null 2>&1; then
+        GPU_PACKAGES="$GPU_PACKAGES $pkg"
+    else
+        warn "Package $pkg not available in apt — GPU build will be skipped"
+    fi
+done
+
+if [ -n "$GPU_PACKAGES" ]; then
+    info "Installing GPU (OpenCL) packages:$GPU_PACKAGES"
+    sudo apt-get install -y --no-install-recommends $GPU_PACKAGES
+    USE_OPENCL=ON
+else
+    warn "OpenCL packages not found. GPU acceleration will not be available."
+    USE_OPENCL=OFF
+fi
+
+# WSL2 + NVIDIA GPU: install the OpenCL ICD so the runtime can find the GPU.
+# The Windows NVIDIA driver exposes the GPU to WSL2 via /usr/lib/wsl/lib/
+# but the OpenCL ICD loader inside WSL needs nvidia-opencl-icd to discover it.
+# See: https://docs.nvidia.com/cuda/wsl-user-guide/index.html
+if [ "$USE_OPENCL" = "ON" ] && grep -qi microsoft /proc/version 2>/dev/null; then
+    if [ -d /usr/lib/wsl/lib ]; then
+        info "WSL2 detected with GPU passthrough (/usr/lib/wsl/lib exists)"
+        # Ensure the WSL lib path is in ld search path
+        if [ ! -f /etc/ld.so.conf.d/wsl-gpu.conf ]; then
+            echo "/usr/lib/wsl/lib" | sudo tee /etc/ld.so.conf.d/wsl-gpu.conf >/dev/null
+            sudo ldconfig 2>/dev/null || true
+        fi
+        # Install NVIDIA OpenCL ICD if available
+        if apt-cache show nvidia-opencl-icd 2>/dev/null | grep -q "^Package:" 2>/dev/null; then
+            info "Installing nvidia-opencl-icd for WSL2 GPU runtime support"
+            sudo apt-get install -y --no-install-recommends nvidia-opencl-icd 2>/dev/null || \
+                warn "nvidia-opencl-icd install failed (non-fatal, GPU may still work via /usr/lib/wsl/lib)"
+        else
+            # On newer WSL2 with NVIDIA drivers, libOpenCL is in /usr/lib/wsl/lib/
+            # and the ICD files may already be present. Check for clinfo.
+            if command -v clinfo >/dev/null 2>&1; then
+                NDEV=$(clinfo --list 2>/dev/null | grep -c "Device" || echo 0)
+                if [ "$NDEV" -gt 0 ]; then
+                    ok "OpenCL runtime detected via WSL2 GPU passthrough ($NDEV device(s))"
+                else
+                    warn "OpenCL ICD loader found but no devices. Check Windows NVIDIA driver."
+                    warn "Required: NVIDIA Game Ready or Studio driver >= 470.76 on Windows"
+                    warn "Install CUDA Toolkit in WSL: sudo apt install nvidia-cuda-toolkit"
+                fi
+            else
+                info "Installing clinfo to verify GPU access..."
+                sudo apt-get install -y --no-install-recommends clinfo 2>/dev/null || true
+                if command -v clinfo >/dev/null 2>&1; then
+                    NDEV=$(clinfo --list 2>/dev/null | grep -c "Device" || echo 0)
+                    if [ "$NDEV" -gt 0 ]; then
+                        ok "OpenCL GPU detected: $NDEV device(s)"
+                    else
+                        warn "No OpenCL GPU devices found. Ensure Windows has NVIDIA driver >= 470.76"
+                        warn "Try: sudo apt install nvidia-cuda-toolkit"
+                    fi
+                fi
+            fi
+        fi
+    else
+        info "WSL2 detected but no GPU passthrough (/usr/lib/wsl/lib not found)"
+        warn "Install NVIDIA driver on Windows for WSL2 GPU support"
+        warn "See: https://docs.nvidia.com/cuda/wsl-user-guide/index.html"
+    fi
+fi
+
 # SDR backend headers (install what's available, skip what's not)
 # These -dev packages only add header files for compilation.
 SDR_PACKAGES=""
@@ -113,12 +182,12 @@ info "Configuring build in ${BUILD_DIR}..."
 mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
 
-# GPU acceleration is disabled by default for WSL since most WSL
-# environments lack OpenCL/Vulkan passthrough. If your WSL has
-# GPU support (WSL2 + NVIDIA), change -DUSE_OPENCL=OFF to ON.
+# GPU acceleration is auto-detected: enabled if opencl-headers and
+# ocl-icd-opencl-dev were installed above, disabled otherwise.
+# On WSL2 + NVIDIA, OpenCL passthrough typically works.
 cmake "${SCRIPT_DIR}" \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-    -DUSE_OPENCL=OFF \
+    -DUSE_OPENCL=${USE_OPENCL:-OFF} \
     -DUSE_VULKAN=OFF
 
 echo ""

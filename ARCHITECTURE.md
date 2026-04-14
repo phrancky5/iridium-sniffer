@@ -108,6 +108,8 @@ SDR / IQ File / ZMQ SUB / VITA 49
 | `simd_avx2.c` | AVX2+FMA kernel implementations (256-bit, 8 floats) | 388 | New (CEMAXECUTER LLC) |
 | `simd_sse42.c` | SSE4.2 kernel implementations (128-bit, 4 floats) | 372 | New (CEMAXECUTER LLC) |
 | `vita49.c/h` | VITA 49 (VRT) UDP input for IQ samples | 423 | New (CEMAXECUTER LLC) |
+| `sigmf.c/h` | SigMF metadata reader for zero-config file input | 134 | New (alphafox02) |
+| `cJSON.c/h` | Vendored JSON parser (MIT) for SigMF | 3206 | External (Dave Gamble) |
 | `sdrplay.c/h` | SDRplay RSP backend (native API 3.x) | 433 | New (CEMAXECUTER LLC) |
 | `rotator.h` | Complex frequency rotator (inline) | 48 | New (replaces GR rotator) |
 | `window_func.c/h` | Blackman window generation | 24 | New |
@@ -126,6 +128,11 @@ SDR / IQ File / ZMQ SUB / VITA 49
 | `blocking_queue.h` | Lock-free blocking queue | 556 | Copied from ice9 |
 | `fair_lock.h` | Fair reader-writer lock | 292 | Copied from ice9 |
 | `pthread_barrier.h` | macOS pthread_barrier shim | 81 | Copied from ice9 |
+| `gui/app.py` | Mission Control Flask backend (start/stop, stats, TLE proxy) | ~580 | New (NXC2 Edition) |
+| `gui/templates/index.html` | Mission Control UI (tabs, charts, 3D globe) | ~2100 | New (NXC2 Edition) |
+| `gui/static/js/iridium-globe.js` | CesiumJS + satellite.js 3D globe module | 866 | Adapted from INTERCEPT |
+| `gui/requirements.txt` | Python dependencies (flask, flask-socketio) | 2 | New (NXC2 Edition) |
+| `Start-MissionControl.ps1` | PowerShell launcher for Windows/WSL | 44 | New (NXC2 Edition) |
 
 ## Key Parameters (at 10 MHz sample rate)
 
@@ -762,3 +769,45 @@ The threshold is relative to the adaptive noise floor, so it works equally well 
 - Confidence runs lower than gr-iridium on synthetic data due to int8 quantization effects in constellation measurement. Does not affect bit-level correctness.
 - GPU burst detection is slower than CPU on fast x86 CPUs at 10 MHz (GPU batching overhead). Expected to help on weaker CPUs (Pi 5) or higher sample rates.
 - Vulkan backend not yet tested on Raspberry Pi 5 hardware (verified on NVIDIA only).
+
+## Mission Control GUI Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Browser (index.html)                                       │
+│  ├─ Socket.IO client ↔ Flask-SocketIO backend               │
+│  ├─ Tabs: RAW | Log | Spectrum | Constellation | Decoded    │
+│  ├─ 3D Globe Tab (lazy-loaded):                             │
+│  │   ├─ CesiumJS (CDN, ~4 MB) — 3D Earth rendering          │
+│  │   ├─ satellite.js (CDN, ~40 KB) — SGP4 propagation        │
+│  │   └─ iridium-globe.js — orbit/beam/visibility logic       │
+│  └─ Chart.js — live spectrum + stats charts                  │
+└────────────────────────┬────────────────────────────────────┘
+                         │ WebSocket + REST
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│  gui/app.py — Flask + Socket.IO                             │
+│  ├─ /api/start, /api/stop — subprocess management           │
+│  ├─ /api/tles — CelesTrak TLE proxy (6h cache, urllib)      │
+│  ├─ /api/observer — observer location (JSON file persist)   │
+│  ├─ stdout_reader → socket.emit('raw_line', 'frame')        │
+│  ├─ stderr_reader → socket.emit('stats', 'log', 'position') │
+│  └─ Doppler POS: regex → auto-update observer location      │
+└────────────────────────┬────────────────────────────────────┘
+                         │ subprocess (stdin/stdout/stderr)
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│  build/iridium-sniffer                                       │
+│  (burst detect → downmix → demod → frame decode → output)    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 3D Globe Data Flow
+
+1. User clicks 3D Globe tab → `loadGlobe()` fires
+2. `iridium-globe.js` loads CesiumJS + satellite.js from CDN (one-time)
+3. Fetches `GET /api/tles` → Flask proxies CelesTrak TLE data (avoids CORS)
+4. satellite.js computes SGP4 positions for all 66 Iridium NEXT satellites
+5. CesiumJS renders 3D Earth with satellite entities, orbits, and beam coverage
+6. 30fps animation loop updates satellite positions in real time
+7. When `--position` is active, Doppler solutions auto-update the observer location

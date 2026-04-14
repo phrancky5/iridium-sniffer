@@ -51,8 +51,10 @@ iridium-sniffer is a standalone replacement for [gr-iridium](https://github.com/
 - Three-tier SIMD dispatch: AVX2+FMA / SSE4.2 / Scalar  
 - GPU-accelerated burst detection FFT via OpenCL or Vulkan (runtime plugin)  
 - ZMQ PUB/SUB output for multi-consumer iridium-toolkit compatibility  
-- ZMQ SUB and VITA 49/VRT network IQ input for distributed setups  
-- SDR support: HackRF, BladeRF, USRP (UHD), SDRplay, SoapySDR, plus file input
+- ZMQ SUB and VITA 49/VRT network IQ input for distributed setups (VITA 49 auto-detect)  
+- SigMF metadata input — automatic center frequency, sample rate, and format from `.sigmf-meta` files  
+- SDR support: HackRF, BladeRF, USRP (UHD), SDRplay, SoapySDR, plus file input  
+- Mission Control GUI — Flask/Socket.IO dashboard with 3D CesiumJS globe, real-time spectrum, constellation, and decoded data views
 
 ---
 
@@ -438,6 +440,14 @@ FFTW plans are created with `FFTW_MEASURE` (benchmarks multiple FFT algorithms a
 
 The demod thread writes RAW to stdout immediately (hot path). All slow work — web map SSE updates, ACARS text decode, Doppler solver, GSMTAP UDP — is dispatched through `output_queue` to a dedicated frame output thread. This ensures the demod thread never blocks on I/O.
 
+### 6a. Non-Fatal Optional Feature Initialization
+
+Web Map, ZMQ PUB, and GSMTAP are optional features that bind network ports. If a port is already in use (e.g. from a previous orphaned process), the feature logs a warning to stderr and is disabled for the session — capture continues normally. This eliminates the most common cause of "Process ended" failures on stop/start cycles.
+
+### 6b. Immediate Port Release on Shutdown
+
+On SIGTERM/SIGINT, network sockets (web map, ZMQ PUB, GSMTAP) are closed *before* the processing pipeline is drained. Queue draining and thread joins can take several seconds; releasing ports first ensures they are free for an immediate restart. The ZMQ PUB socket sets `ZMQ_LINGER=0` to prevent `zmq_close()` from blocking on unsent messages.
+
 ### 7\. GPU as a Runtime Plugin
 
 `libiridium-sniffer-gpu.so` is loaded via `dlopen` at startup. If the file is missing, GPU loading fails silently and FFTW is used. This avoids linking GPU libraries into the main binary, keeping it deployable on systems without GPU drivers.
@@ -645,7 +655,9 @@ iridium-sniffer-master/
 
 ├── gsmtap.c/.h             GSMTAP/Wireshark integration
 
-├── vita49.c/.h             VITA 49/VRT UDP input
+├── vita49.c/.h             VITA 49/VRT UDP input (auto-detect)
+├── sigmf.c/.h              SigMF metadata parser
+├── cJSON.c/.h              Embedded JSON parser (MIT, used by SigMF & GUI)
 
 │
 
@@ -730,6 +742,20 @@ iridium-sniffer-master/
 │   ├── rtl-sdr.sh
 
 │   └── airspy-r2.sh
+
+│
+
+├── gui/
+│   ├── app.py              Flask + Socket.IO backend (Mission Control)
+│   ├── requirements.txt    Python dependencies
+│   ├── templates/
+│   │   └── index.html      Single-page GUI
+│   └── static/js/
+│       └── iridium-globe.js  CesiumJS 3D globe module
+
+│
+
+├── Start-MissionControl.ps1  PowerShell launcher (Windows → WSL)
 
 │
 
@@ -873,6 +899,35 @@ This provides a real-time view of where Iridium bursts are landing in the freque
 
 This is a synthetic visualization based on decoded frame quality. It does not display actual I/Q symbols (those are processed inside the C binary) but accurately represents the demodulation quality distribution.
 
+#### Tab: 3D Globe
+
+**CesiumJS satellite globe** showing real-time Iridium constellation visualization.
+
+- **3D Earth** rendered via CesiumJS (loaded from CDN, ~4 MB) with satellite.js orbit propagation  
+- **TLE Data**: Fetched from CelesTrak and cached for 6 hours via `/api/tles`  
+- **Modes**: Live (real-time clock) / Session (synced to capture start time via `_getSessionEpochMs()`)  
+- **Map styles**: Dark, Satellite, Street via dropdown  
+- **Toggles**: Show/hide beams, orbits  
+- **Position markers**: When `--doppler` produces a fix, a green marker appears at the computed location via WebSocket `position` event  
+- **Observer location**: Configurable via `/api/observer` endpoint; persisted in `gui/observer_location.json`  
+- **Reset View**: Re-centers the camera on the observer location  
+- **Refresh TLEs**: Forces a fresh fetch from CelesTrak, bypassing the 6-hour cache  
+
+**Interactive markers:**
+
+- **Hover tooltip** — moving the cursor over any entity displays a translucent dark tooltip near the cursor showing key info (name, type, lat/lon). The tooltip disappears when the cursor leaves the entity.
+- **Click detail panel** — clicking an entity opens a fixed info panel (top-right corner) with a full metadata table. Panel content varies by entity type:
+  - *Satellite* — NORAD ID, orbit plane, inclination, lat/lon/alt, velocity
+  - *Beam* — beam ID, satellite, center lat/lon, radius
+  - *MT* — terminal lat/lon/alt
+  - *Aircraft* — registration, flight, position, altitude (FL), number of fixes
+  - *Receiver* — lat/lon, HDOP, altitude, error estimate
+  - *Sat Pos* — satellite number, Doppler-derived lat/lon/alt
+  - *Observer* — configured lat/lon/alt
+- Clicking empty sky closes the panel.
+
+The globe loads lazily on first tab switch to avoid blocking the initial page load.
+
 #### Tab: Decoded Data
 
 **Structured frame data table** showing every decoded frame in a sortable, scannable format.
@@ -903,14 +958,22 @@ The bottom bar shows the exact CLI command constructed from the GUI settings, vi
 
 ### Backend Architecture (gui/app.py)
 
-- Flask serves the SPA on `/`  
-- REST endpoints: `GET /api/status`, `GET /api/devices`, `POST /api/start`, `POST /api/stop`  
+- Flask serves the SPA on `/` with static files from `gui/static/`  
+- REST endpoints: `GET /api/status`, `GET /api/devices`, `POST /api/start`, `POST /api/stop`
+- **Orphan cleanup**: Before starting a new capture, `api_start` kills any orphaned `iridium-sniffer` processes to prevent port conflicts
+- **Robust stop**: `api_stop` sends SIGTERM, waits 5 s, then SIGKILL if needed — prevents zombie processes holding ports  
+- **3D Globe endpoints:**  
+  - `GET /api/tles` — returns cached Iridium NEXT TLEs (JSON); auto-fetches from CelesTrak if cache is empty or older than 6 hours  
+  - `POST /api/tles/refresh` — forces a fresh TLE fetch, bypassing the cache TTL  
+  - `GET /api/observer` — returns the saved observer location (lat/lon/alt)  
+  - `POST /api/observer` — saves a new observer location to `gui/observer_location.json`  
 - WebSocket events (Socket.IO):  
   - `status` — running/stopped state  
   - `stats` — parsed 1 Hz stderr metrics  
   - `raw_line` — raw stdout text  
   - `frame` — structured parsed RAW line data (freq, SNR, confidence, etc.) used by Spectrum, Constellation, and Decoded tabs  
   - `log` — non-stats stderr lines  
+  - `position` — Doppler position fix (lat, lon, alt, error_km) parsed from `--doppler` stderr output, used by the 3D Globe tab  
 - The subprocess runs with `preexec_fn=os.setsid` for clean process group termination  
 - All user-supplied string fields are validated against shell metacharacters as defense-in-depth  
 - The GUI venv at `gui/venv/` is fully isolated from any other Python environment

@@ -1,0 +1,1201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iridium-sniffer Interactive User Manual</title>
+    <style>
+        :root {
+            --bg: #f4efe5;
+            --panel: rgba(255, 251, 245, 0.92);
+            --panel-strong: #fffdf8;
+            --ink: #1f2430;
+            --muted: #5d6658;
+            --accent: #0d6b67;
+            --accent-2: #bf5a36;
+            --accent-3: #d5b25b;
+            --line: rgba(31, 36, 48, 0.12);
+            --shadow: 0 24px 60px rgba(43, 48, 60, 0.12);
+            --radius: 20px;
+            --radius-sm: 12px;
+            --code-bg: #1d222c;
+            --code-ink: #eef4ff;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            margin: 0;
+            color: var(--ink);
+            background:
+                radial-gradient(circle at top left, rgba(13, 107, 103, 0.18), transparent 28%),
+                radial-gradient(circle at 85% 12%, rgba(191, 90, 54, 0.16), transparent 20%),
+                linear-gradient(180deg, #f8f3ea 0%, #efe7d8 100%);
+            font-family: Aptos, "Segoe UI Variable Text", "Trebuchet MS", sans-serif;
+            line-height: 1.55;
+        }
+
+        a {
+            color: var(--accent);
+        }
+
+        .shell {
+            display: grid;
+            grid-template-columns: 300px minmax(0, 1fr);
+            min-height: 100vh;
+        }
+
+        .sidebar {
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            padding: 28px 22px;
+            background: rgba(255, 248, 238, 0.84);
+            border-right: 1px solid var(--line);
+            backdrop-filter: blur(16px);
+        }
+
+        .brand {
+            padding: 18px;
+            border-radius: var(--radius);
+            background: linear-gradient(135deg, rgba(13, 107, 103, 0.12), rgba(191, 90, 54, 0.12));
+            box-shadow: var(--shadow);
+        }
+
+        .brand h1 {
+            margin: 0 0 8px;
+            font-size: 1.45rem;
+            line-height: 1.15;
+            font-family: "Aptos Display", "Segoe UI Variable Display", "Trebuchet MS", sans-serif;
+        }
+
+        .brand p,
+        .nav-note,
+        .tiny {
+            color: var(--muted);
+            font-size: 0.95rem;
+        }
+
+        nav {
+            margin-top: 24px;
+            display: grid;
+            gap: 8px;
+        }
+
+        .nav-link {
+            padding: 10px 12px;
+            border-radius: 999px;
+            color: var(--ink);
+            text-decoration: none;
+            transition: background 180ms ease, transform 180ms ease;
+        }
+
+        .nav-link:hover,
+        .nav-link.active {
+            background: rgba(13, 107, 103, 0.12);
+            transform: translateX(4px);
+        }
+
+        .sidebar-card {
+            margin-top: 22px;
+            padding: 16px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius-sm);
+            background: rgba(255, 255, 255, 0.7);
+        }
+
+        .content {
+            padding: 32px;
+        }
+
+        .hero,
+        .panel,
+        .grid-card,
+        .callout,
+        .command-output,
+        .table-wrap,
+        details {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+        }
+
+        .hero {
+            overflow: hidden;
+            position: relative;
+            padding: 36px;
+        }
+
+        .hero::after {
+            content: "";
+            position: absolute;
+            inset: auto -10% -20% auto;
+            width: 320px;
+            height: 320px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(213, 178, 91, 0.25), transparent 65%);
+            pointer-events: none;
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 12px;
+            border-radius: 999px;
+            background: rgba(13, 107, 103, 0.1);
+            color: var(--accent);
+            font-size: 0.88rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .hero h2 {
+            margin: 18px 0 12px;
+            font-size: clamp(2rem, 4vw, 3.4rem);
+            line-height: 1.02;
+            max-width: 11ch;
+            font-family: "Aptos Display", "Segoe UI Variable Display", Georgia, serif;
+        }
+
+        .hero p {
+            max-width: 68ch;
+            font-size: 1.05rem;
+        }
+
+        .hero-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 24px;
+        }
+
+        .button,
+        button,
+        select,
+        input {
+            font: inherit;
+        }
+
+        .button,
+        button {
+            border: 0;
+            border-radius: 999px;
+            padding: 11px 16px;
+            cursor: pointer;
+            transition: transform 160ms ease, opacity 160ms ease, background 160ms ease;
+        }
+
+        .button:hover,
+        button:hover {
+            transform: translateY(-1px);
+        }
+
+        .button-primary {
+            background: var(--accent);
+            color: #fff;
+            text-decoration: none;
+        }
+
+        .button-secondary,
+        .copy-btn {
+            background: rgba(31, 36, 48, 0.08);
+            color: var(--ink);
+        }
+
+        .section {
+            margin-top: 28px;
+        }
+
+        .section h3 {
+            margin: 0 0 12px;
+            font-size: 1.8rem;
+            font-family: "Aptos Display", "Segoe UI Variable Display", Georgia, serif;
+        }
+
+        .section-head {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            gap: 16px;
+            align-items: end;
+            margin-bottom: 14px;
+        }
+
+        .section-head p {
+            margin: 0;
+            max-width: 68ch;
+            color: var(--muted);
+        }
+
+        .panel {
+            padding: 22px;
+        }
+
+        .wizard-grid,
+        .quick-grid,
+        .step-grid,
+        .facts-grid,
+        .mode-grid {
+            display: grid;
+            gap: 18px;
+        }
+
+        .wizard-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .quick-grid,
+        .mode-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .step-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .facts-grid {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+
+        label {
+            display: grid;
+            gap: 8px;
+            color: var(--muted);
+            font-weight: 700;
+        }
+
+        select,
+        input[type="search"] {
+            width: 100%;
+            padding: 12px 14px;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background: var(--panel-strong);
+            color: var(--ink);
+        }
+
+        .command-output {
+            margin-top: 18px;
+            padding: 0;
+            overflow: hidden;
+        }
+
+        .command-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: center;
+            padding: 14px 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            background: linear-gradient(90deg, #202734, #243a48);
+            color: #fff;
+        }
+
+        pre {
+            margin: 0;
+            padding: 18px;
+            overflow-x: auto;
+            background: var(--code-bg);
+            color: var(--code-ink);
+            font-family: Consolas, "Cascadia Mono", monospace;
+            font-size: 0.95rem;
+        }
+
+        code {
+            font-family: Consolas, "Cascadia Mono", monospace;
+        }
+
+        .grid-card {
+            padding: 20px;
+        }
+
+        .grid-card h4,
+        details summary,
+        .step h4,
+        .fact-value {
+            margin: 0;
+            font-size: 1.05rem;
+        }
+
+        .grid-card p,
+        .step p,
+        .fact-label {
+            color: var(--muted);
+        }
+
+        .grid-card ul,
+        .callout ul,
+        details ul {
+            margin: 12px 0 0;
+            padding-left: 20px;
+        }
+
+        .chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 14px;
+        }
+
+        .chip {
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: rgba(13, 107, 103, 0.1);
+            color: var(--accent);
+            font-size: 0.88rem;
+            font-weight: 700;
+        }
+
+        .callout {
+            padding: 18px 20px;
+            border-left: 6px solid var(--accent-2);
+        }
+
+        .step {
+            padding: 18px;
+            border-radius: var(--radius-sm);
+            background: rgba(255, 255, 255, 0.68);
+            border: 1px solid var(--line);
+        }
+
+        .step-number {
+            display: inline-grid;
+            place-items: center;
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            background: var(--ink);
+            color: #fff;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .fact {
+            padding: 18px;
+            border-radius: var(--radius-sm);
+            background: rgba(255, 255, 255, 0.68);
+            border: 1px solid var(--line);
+        }
+
+        .fact-value {
+            font-size: 1.4rem;
+            color: var(--accent-2);
+        }
+
+        .table-wrap {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 720px;
+        }
+
+        th,
+        td {
+            padding: 14px 16px;
+            text-align: left;
+            border-bottom: 1px solid var(--line);
+            vertical-align: top;
+        }
+
+        th {
+            font-size: 0.82rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        details {
+            padding: 0;
+            overflow: hidden;
+        }
+
+        details + details {
+            margin-top: 14px;
+        }
+
+        details summary {
+            list-style: none;
+            cursor: pointer;
+            padding: 18px 20px;
+            background: rgba(255, 255, 255, 0.52);
+        }
+
+        details summary::-webkit-details-marker {
+            display: none;
+        }
+
+        details .details-body {
+            padding: 0 20px 20px;
+        }
+
+        .search-note {
+            margin-top: 8px;
+            color: var(--muted);
+            font-size: 0.92rem;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .footer {
+            margin-top: 32px;
+            padding: 22px;
+            border-radius: var(--radius);
+            background: rgba(31, 36, 48, 0.92);
+            color: rgba(255, 255, 255, 0.86);
+        }
+
+        .footer a {
+            color: #ffe4a5;
+        }
+
+        @media (max-width: 1100px) {
+            .shell,
+            .wizard-grid,
+            .quick-grid,
+            .step-grid,
+            .facts-grid,
+            .mode-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .sidebar {
+                position: relative;
+                height: auto;
+            }
+        }
+
+        @media (max-width: 700px) {
+            .content,
+            .sidebar {
+                padding: 18px;
+            }
+
+            .hero,
+            .panel,
+            .grid-card,
+            .callout,
+            .footer {
+                padding: 18px;
+            }
+
+            .command-head {
+                flex-direction: column;
+                align-items: start;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="eyebrow">Mission Guide</div>
+                <h1>iridium-sniffer Interactive User Manual</h1>
+                <p>One local file that explains how to build, launch, decode, visualize, and troubleshoot the NXC2 edition.</p>
+            </div>
+
+            <nav aria-label="Sections">
+                <a class="nav-link" href="#start-here">Start Here</a>
+                <a class="nav-link" href="#command-builder">Command Builder</a>
+                <a class="nav-link" href="#operating-modes">Operating Modes</a>
+                <a class="nav-link" href="#mission-control">Mission Control</a>
+                <a class="nav-link" href="#field-reference">Field Reference</a>
+                <a class="nav-link" href="#troubleshooting">Troubleshooting</a>
+                <a class="nav-link" href="#workflow-checklists">Checklists</a>
+            </nav>
+
+            <div class="sidebar-card">
+                <strong>Best first run</strong>
+                <p class="nav-note">Use the command builder, start with live capture or a recorded file, then add web map, ACARS, GSMTAP, or Doppler positioning only after the base pipeline is stable.</p>
+            </div>
+
+            <div class="sidebar-card tiny">
+                Based on repo documentation, actual launcher scripts, and current command-line flags in this workspace.
+            </div>
+        </aside>
+
+        <main class="content">
+            <section class="hero" id="start-here">
+                <div class="eyebrow">Operator View</div>
+                <h2>Choose a workflow, then run the right command.</h2>
+                <p>This manual is designed for actual operation, not passive reading. Pick your input source, hardware, and goal, and the page will generate the most relevant command line. The rest of the page explains what each mode does, when to use it, and what healthy output looks like.</p>
+                <div class="hero-actions">
+                    <a class="button button-primary" href="#command-builder">Build a Command</a>
+                    <a class="button button-secondary" href="#mission-control">Open Mission Control Section</a>
+                </div>
+                <div class="chip-row">
+                    <span class="chip">Live SDR capture</span>
+                    <span class="chip">File playback</span>
+                    <span class="chip">Web map</span>
+                    <span class="chip">ACARS/SBD</span>
+                    <span class="chip">Wireshark GSMTAP</span>
+                    <span class="chip">Doppler positioning</span>
+                </div>
+            </section>
+
+            <section class="section">
+                <div class="section-head">
+                    <div>
+                        <h3>What This Project Does</h3>
+                        <p>iridium-sniffer is a standalone C-based Iridium burst detector and demodulator. It reads live IQ from SDR hardware or IQ files, detects bursts, demodulates them, and emits iridium-toolkit compatible RAW output. Optional features add ACARS/SBD decoding, a live web map, Mission Control GUI, GSMTAP output for Wireshark, ZMQ integration, VITA 49 input, and Doppler-based receiver positioning.</p>
+                    </div>
+                </div>
+                <div class="facts-grid">
+                    <div class="fact">
+                        <div class="fact-value">10 MHz</div>
+                        <div class="fact-label">Default sample rate for full authorized Iridium coverage</div>
+                    </div>
+                    <div class="fact">
+                        <div class="fact-value">1622 MHz</div>
+                        <div class="fact-label">Default center frequency for wideband receivers</div>
+                    </div>
+                    <div class="fact">
+                        <div class="fact-value">16 dB</div>
+                        <div class="fact-label">Default burst threshold for maximum recovery</div>
+                    </div>
+                    <div class="fact">
+                        <div class="fact-value">5050 / 8888</div>
+                        <div class="fact-label">Mission Control default port / web map default port</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section" id="command-builder">
+                <div class="section-head">
+                    <div>
+                        <h3>Command Builder</h3>
+                        <p>Select the scenario that matches your setup. The generated command focuses on the primary action first, then adds optional outputs without hiding what the binary is actually doing.</p>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="wizard-grid">
+                        <label>
+                            Input type
+                            <select id="inputType">
+                                <option value="live">Live SDR</option>
+                                <option value="file">IQ file playback</option>
+                                <option value="zmq-sub">Remote ZMQ IQ feed</option>
+                                <option value="vita49">VITA 49 / VRT UDP input</option>
+                            </select>
+                        </label>
+
+                        <label>
+                            SDR or source
+                            <select id="hardwareType">
+                                <option value="soapy">SoapySDR device</option>
+                                <option value="hackrf">HackRF</option>
+                                <option value="usrp">USRP</option>
+                                <option value="bladerf">BladeRF</option>
+                                <option value="sdrplay">SDRplay</option>
+                                <option value="rtl">RTL-SDR narrowband</option>
+                            </select>
+                        </label>
+
+                        <label>
+                            Primary goal
+                            <select id="goalType">
+                                <option value="raw">RAW output only</option>
+                                <option value="web">Web map</option>
+                                <option value="acars">ACARS / SBD decoding</option>
+                                <option value="gsmtap">Wireshark GSMTAP</option>
+                                <option value="position">Doppler positioning</option>
+                                <option value="parsed">Parsed IDA output</option>
+                                <option value="mission-control">Mission Control GUI</option>
+                            </select>
+                        </label>
+                    </div>
+
+                    <div class="wizard-grid" style="margin-top: 18px;">
+                        <label>
+                            Performance mode
+                            <select id="performanceMode">
+                                <option value="default">Default</option>
+                                <option value="cpu">Force CPU FFT</option>
+                                <option value="scalar">Disable SIMD</option>
+                                <option value="debug">Verbose diagnostic</option>
+                            </select>
+                        </label>
+
+                        <label>
+                            Sample profile
+                            <select id="sampleProfile">
+                                <option value="wide">Wideband 10 MHz</option>
+                                <option value="narrow">Narrowband 2.4 MHz</option>
+                                <option value="extended">Extended 12 MHz</option>
+                            </select>
+                        </label>
+
+                        <label>
+                            Output extras
+                            <select id="extraType">
+                                <option value="none">None</option>
+                                <option value="feed">Aggregator feed</option>
+                                <option value="zmq">ZMQ PUB output</option>
+                                <option value="save">Save decoded bursts</option>
+                            </select>
+                        </label>
+                    </div>
+
+                    <div class="command-output" aria-live="polite">
+                        <div class="command-head">
+                            <strong id="commandTitle">Generated operating command</strong>
+                            <button class="copy-btn" type="button" data-copy-target="generatedCommand">Copy command</button>
+                        </div>
+                        <pre id="generatedCommand"></pre>
+                    </div>
+
+                    <p class="search-note" id="commandExplanation"></p>
+                </div>
+            </section>
+
+            <section class="section" id="operating-modes">
+                <div class="section-head">
+                    <div>
+                        <h3>Operating Modes</h3>
+                        <p>Each mode adds capability, but each also adds moving parts. Start with RAW output, then layer features one at a time.</p>
+                    </div>
+                </div>
+
+                <div class="mode-grid">
+                    <article class="grid-card">
+                        <h4>1. Base decode</h4>
+                        <p>Use this to validate RF chain, gain, and burst detection before adding visualizers or higher-layer decoders.</p>
+                        <pre>./iridium-sniffer -i soapy-0</pre>
+                    </article>
+
+                    <article class="grid-card">
+                        <h4>2. Web map</h4>
+                        <p>Starts the built-in HTTP server and shows ring alerts, satellites, aircraft, and receiver position when available.</p>
+                        <pre>./iridium-sniffer -i soapy-0 --web</pre>
+                    </article>
+
+                    <article class="grid-card">
+                        <h4>3. ACARS / SBD</h4>
+                        <p>Decodes IDA-carried aviation and short burst data directly in the binary. No Python pipeline required.</p>
+                        <pre>./iridium-sniffer -i soapy-0 --acars</pre>
+                    </article>
+
+                    <article class="grid-card">
+                        <h4>4. Wireshark</h4>
+                        <p>Sends decoded IDA frames to GSMTAP/LAPDm over UDP for Wireshark inspection.</p>
+                        <pre>./iridium-sniffer -i soapy-0 --gsmtap</pre>
+                    </article>
+
+                    <article class="grid-card">
+                        <h4>5. Position solving</h4>
+                        <p>Uses Doppler shift from multiple satellites to estimate receiver position. Best with stable clocks and open sky.</p>
+                        <pre>./iridium-sniffer -i soapy-0 --position</pre>
+                    </article>
+
+                    <article class="grid-card">
+                        <h4>6. Parsed output</h4>
+                        <p>Emits parsed IDA lines to stdout for reassembler workflows. Non-IDA frames remain as RAW lines.</p>
+                        <pre>./iridium-sniffer -i soapy-0 --parsed</pre>
+                    </article>
+                </div>
+            </section>
+
+            <section class="section">
+                <div class="callout">
+                    <strong>Practical rule:</strong>
+                    <p>Low ok% does not automatically mean poor performance. This project defaults to a more aggressive 16 dB threshold than gr-iridium, so it detects more weak bursts. That can lower the success percentage while still increasing total decoded frame count.</p>
+                </div>
+            </section>
+
+            <section class="section" id="mission-control">
+                <div class="section-head">
+                    <div>
+                        <h3>Mission Control</h3>
+                        <p>The GUI is a browser-based control surface for launching the sniffer, watching live output, viewing spectrum and constellation plots, and rendering the 3D globe. In this repo it is started by the PowerShell launcher at the project root.</p>
+                    </div>
+                </div>
+
+                <div class="step-grid">
+                    <div class="step">
+                        <div class="step-number">1</div>
+                        <h4>Launch from Windows</h4>
+                        <p>Run the provided launcher. It starts the Flask GUI in WSL, prepares a Python virtual environment if needed, and opens your browser.</p>
+                        <pre>./Start-MissionControl.ps1
+# or
+./Start-MissionControl.ps1 -Port 8080</pre>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-number">2</div>
+                        <h4>Confirm the GUI tabs</h4>
+                        <p>Expect tabs for RAW Output, System Log, Spectrum, Constellation, Decoded Data, and 3D Globe.</p>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-number">3</div>
+                        <h4>Start simple</h4>
+                        <p>Begin with a base live capture profile, confirm decoded bursts, then enable globe, web map, ACARS, or position solving only after base data flow is clean.</p>
+                    </div>
+                </div>
+
+                <div class="quick-grid" style="margin-top: 18px;">
+                    <article class="grid-card">
+                        <h4>Mission Control is best for</h4>
+                        <ul>
+                            <li>Monitoring stdout and stderr without terminal juggling</li>
+                            <li>Watching constellation quality via the DQPSK scatter plot</li>
+                            <li>Using the 3D Globe without manually wiring satellite visualization pieces</li>
+                            <li>Controlling sessions from a browser while the backend stays in WSL</li>
+                        </ul>
+                    </article>
+
+                    <article class="grid-card">
+                        <h4>Mission Control is not a substitute for</h4>
+                        <ul>
+                            <li>Proper SDR gain staging</li>
+                            <li>Correct sample rate and center frequency selection</li>
+                            <li>Antenna placement and sky visibility</li>
+                            <li>Verifying raw CLI behavior before adding GUI complexity</li>
+                        </ul>
+                    </article>
+                </div>
+            </section>
+
+            <section class="section" id="field-reference">
+                <div class="section-head">
+                    <div>
+                        <h3>Field Reference</h3>
+                        <p>These are the settings and outputs that operators most often need to interpret during real sessions.</p>
+                    </div>
+                </div>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Item</th>
+                                <th>Default</th>
+                                <th>Meaning</th>
+                                <th>When to change it</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Center frequency</td>
+                                <td>1622000000</td>
+                                <td>Wideband default covering the authorized Iridium band with a 10 MHz sample rate.</td>
+                                <td>Shift to 1625500000 for narrowband SDRs such as RTL-SDR targeting ring alerts.</td>
+                            </tr>
+                            <tr>
+                                <td>Sample rate</td>
+                                <td>10000000</td>
+                                <td>Balanced default for broad coverage and expected pipeline tuning.</td>
+                                <td>Use 2400000 for narrowband devices or 12000000 for extended coverage experiments.</td>
+                            </tr>
+                            <tr>
+                                <td>Threshold</td>
+                                <td>16 dB</td>
+                                <td>Detection sensitivity. Lower catches more weak bursts, higher reduces noise-triggered work.</td>
+                                <td>Raise toward 18 dB when you want cleaner ok% stats or lower CPU churn from weak detections.</td>
+                            </tr>
+                            <tr>
+                                <td>Web map port</td>
+                                <td>8888</td>
+                                <td>HTTP server for the built-in map.</td>
+                                <td>Change if the port is already in use or you want multiple sessions.</td>
+                            </tr>
+                            <tr>
+                                <td>Mission Control port</td>
+                                <td>5050</td>
+                                <td>Flask GUI port used by the PowerShell launcher.</td>
+                                <td>Change when running another local service on 5050.</td>
+                            </tr>
+                            <tr>
+                                <td>RAW output</td>
+                                <td>stdout</td>
+                                <td>iridium-toolkit compatible demodulated frames.</td>
+                                <td>Switch to ZMQ PUB when you want multiple consumers.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="quick-grid" style="margin-top: 18px;">
+                    <article class="grid-card">
+                        <h4>Healthy first signs</h4>
+                        <ul>
+                            <li>Device listing works and selected SDR opens without backend errors</li>
+                            <li>stderr shows steady stats instead of repeated startup failures</li>
+                            <li>RAW lines appear with real frequencies inside the Iridium band</li>
+                            <li>Web map or Mission Control updates every second when enabled</li>
+                        </ul>
+                    </article>
+
+                    <article class="grid-card">
+                        <h4>Likely setup issues</h4>
+                        <ul>
+                            <li>No bursts at all: gain, antenna, band coverage, or wrong device selection</li>
+                            <li>Many bursts, low useful decode: threshold too low, poor SNR, unstable clock, or weak front-end settings</li>
+                            <li>Position solver not converging: insufficient satellite diversity, obstructed sky, or unstable timing</li>
+                            <li>Mission Control fails early: WSL, Python, or GUI venv dependencies not available</li>
+                        </ul>
+                    </article>
+                </div>
+            </section>
+
+            <section class="section" id="troubleshooting">
+                <div class="section-head">
+                    <div>
+                        <h3>Troubleshooting</h3>
+                        <p>Use the search box to narrow the list. Search terms such as gain, WSL, map, ACARS, Wireshark, or RTL work well.</p>
+                    </div>
+                    <label style="min-width: 280px;">
+                        Search troubleshooting topics
+                        <input id="troubleSearch" type="search" placeholder="Type a keyword">
+                    </label>
+                </div>
+
+                <details data-search="device list sdr interface hardware not found soapy hackrf usrp bladerf sdrplay rtl">
+                    <summary>My SDR does not appear in the device list</summary>
+                    <div class="details-body">
+                        <ul>
+                            <li>Run the binary with the device listing mode first rather than guessing an interface string.</li>
+                            <li>Confirm the matching backend library is installed and was detected at build time.</li>
+                            <li>For SoapySDR hardware, use deterministic device args if multiple devices are attached.</li>
+                            <li>On Windows GUI workflows, remember that the launcher runs the GUI in WSL. Your SDR access path must make sense from that environment.</li>
+                        </ul>
+                    </div>
+                </details>
+
+                <details data-search="gain snr threshold low ok weak bursts decode poor noisy">
+                    <summary>I see bursts but decode quality is poor</summary>
+                    <div class="details-body">
+                        <ul>
+                            <li>Raise threshold toward 18 dB if the detector is spending time on too many weak marginal bursts.</li>
+                            <li>Adjust device-specific gain rather than assuming one aggregate gain value fits all hardware.</li>
+                            <li>Check antenna, LNA, filters, and coax losses before blaming demodulation.</li>
+                            <li>Use the constellation or scatter plots in Mission Control to see whether symbol clusters are stable.</li>
+                        </ul>
+                    </div>
+                </details>
+
+                <details data-search="web map browser 8888 no data map stale">
+                    <summary>The web map opens but shows no useful activity</summary>
+                    <div class="details-body">
+                        <ul>
+                            <li>Confirm the base sniffer is actually decoding before diagnosing the map layer.</li>
+                            <li>The map depends on decoded IRA and IBC-related data. If your capture bandwidth misses the relevant channels, visible activity will be limited.</li>
+                            <li>For narrowband devices, use the ring-alert centered profile around 1625500000 Hz and 2400000 samples per second.</li>
+                            <li>Make sure you are loading the correct local port if you changed it with --web=PORT.</li>
+                        </ul>
+                    </div>
+                </details>
+
+                <details data-search="mission control gui wsl flask python venv powershell launcher">
+                    <summary>Mission Control does not launch correctly</summary>
+                    <div class="details-body">
+                        <ul>
+                            <li>The PowerShell launcher requires WSL to exist and the gui folder to be reachable from the WSL mount path.</li>
+                            <li>On first run, the launcher creates a Python virtual environment and installs gui requirements. If Python venv creation fails in WSL, fix that first.</li>
+                            <li>If the browser opens but the page is unavailable, verify the selected port is not blocked or already occupied.</li>
+                            <li>Run the GUI manually from the gui folder in WSL if you need to isolate launcher issues from Flask issues.</li>
+                        </ul>
+                    </div>
+                </details>
+
+                <details data-search="wireshark gsmtap udp 4729 lapdm no packets">
+                    <summary>Wireshark shows no GSMTAP packets</summary>
+                    <div class="details-body">
+                        <ul>
+                            <li>Start Wireshark on the correct local interface and filter UDP port 4729 unless you changed the destination.</li>
+                            <li>GSMTAP depends on IDA decode output, so if no IDA frames are being recovered there will be no Wireshark traffic.</li>
+                            <li>If you redirected the host or port with --gsmtap=HOST:PORT, validate that the destination is reachable.</li>
+                        </ul>
+                    </div>
+                </details>
+
+                <details data-search="acars sbd libacars json feed udp tcp airframes acarshub">
+                    <summary>ACARS feed output does not match what I expect</summary>
+                    <div class="details-body">
+                        <ul>
+                            <li>Use --acars for human-readable terminal output, --acars-json for dumpvdl2-style JSON, and --feed for aggregator-targeted iridium-toolkit JSON.</li>
+                            <li>libacars is optional. Without it, basic ACARS extraction works but deeper ARINC-622 decoding is limited.</li>
+                            <li>Check station identifiers and endpoint syntax when feeding external collectors.</li>
+                        </ul>
+                    </div>
+                </details>
+
+                <p class="search-note">Visible topics: <span id="troubleCount"></span></p>
+            </section>
+
+            <section class="section" id="workflow-checklists">
+                <div class="section-head">
+                    <div>
+                        <h3>Workflow Checklists</h3>
+                        <p>These short sequences are the fastest way to avoid self-inflicted complexity.</p>
+                    </div>
+                </div>
+
+                <div class="quick-grid">
+                    <article class="grid-card">
+                        <h4>Checklist: First live capture</h4>
+                        <ul>
+                            <li>List devices and select the exact interface string you intend to use.</li>
+                            <li>Run base decode with no extra features.</li>
+                            <li>Tune gain and threshold until bursts and useful RAW lines are stable.</li>
+                            <li>Add web map or Mission Control after the CLI is already healthy.</li>
+                        </ul>
+                    </article>
+
+                    <article class="grid-card">
+                        <h4>Checklist: Narrowband RTL-SDR setup</h4>
+                        <ul>
+                            <li>Use a ring-alert centered profile around 1625500000 Hz.</li>
+                            <li>Use a 2400000 sample rate and expect narrower coverage than wideband hardware.</li>
+                            <li>Prioritize web map and ring-alert activity rather than full-band ambitions.</li>
+                        </ul>
+                    </article>
+
+                    <article class="grid-card">
+                        <h4>Checklist: Doppler positioning</h4>
+                        <ul>
+                            <li>Start with clean decode and open sky.</li>
+                            <li>Prefer stable clocks and known altitude if available.</li>
+                            <li>Be patient: convergence needs enough measurements from multiple satellites.</li>
+                        </ul>
+                    </article>
+
+                    <article class="grid-card">
+                        <h4>Checklist: Feeding external tools</h4>
+                        <ul>
+                            <li>Use RAW stdout or ZMQ when driving iridium-toolkit components.</li>
+                            <li>Use --feed for aggregator endpoints such as airframes.io or acarshub.</li>
+                            <li>Use --gsmtap when the destination is Wireshark rather than a text or JSON consumer.</li>
+                        </ul>
+                    </article>
+                </div>
+            </section>
+
+            <footer class="footer">
+                <strong>Related repo docs:</strong>
+                <p>Use README.md for the full flag reference, ARCHITECTURE.md for pipeline internals, and the DOCS folder for deeper GUI and project analysis notes. This manual is intentionally focused on operator workflow and decision support.</p>
+            </footer>
+        </main>
+    </div>
+
+    <script>
+        const inputType = document.getElementById('inputType');
+        const hardwareType = document.getElementById('hardwareType');
+        const goalType = document.getElementById('goalType');
+        const performanceMode = document.getElementById('performanceMode');
+        const sampleProfile = document.getElementById('sampleProfile');
+        const extraType = document.getElementById('extraType');
+        const generatedCommand = document.getElementById('generatedCommand');
+        const commandTitle = document.getElementById('commandTitle');
+        const commandExplanation = document.getElementById('commandExplanation');
+        const troubleSearch = document.getElementById('troubleSearch');
+        const troubleCount = document.getElementById('troubleCount');
+        const troubleItems = Array.from(document.querySelectorAll('#troubleshooting details'));
+
+        function baseSource() {
+            const input = inputType.value;
+            const hardware = hardwareType.value;
+
+            if (input === 'file') {
+                return './iridium-sniffer -f recording.cf32';
+            }
+            if (input === 'zmq-sub') {
+                return './iridium-sniffer --zmq-sub=tcp://127.0.0.1:5555 --format=cf32 -r 10000000';
+            }
+            if (input === 'vita49') {
+                return './iridium-sniffer --vita49';
+            }
+
+            const liveMap = {
+                soapy: './iridium-sniffer -i soapy-0',
+                hackrf: './iridium-sniffer -i hackrf-SERIAL',
+                usrp: './iridium-sniffer -i usrp-PRODUCT-SERIAL',
+                bladerf: './iridium-sniffer -i bladerf0',
+                sdrplay: './iridium-sniffer -i sdrplay-SERIAL',
+                rtl: './iridium-sniffer -i soapy-0'
+            };
+
+            return liveMap[hardware] || './iridium-sniffer -i soapy-0';
+        }
+
+        function sampleArgs() {
+            const profile = sampleProfile.value;
+            const hardware = hardwareType.value;
+            const input = inputType.value;
+            const args = [];
+
+            if (input === 'file') {
+                if (profile === 'narrow') {
+                    args.push('-r 2400000', '-c 1625500000');
+                } else if (profile === 'extended') {
+                    args.push('-r 12000000', '-c 1621000000');
+                }
+                return args;
+            }
+
+            if (profile === 'narrow' || hardware === 'rtl') {
+                args.push('-r 2400000', '-c 1625500000');
+            } else if (profile === 'extended') {
+                args.push('-r 12000000', '-c 1621000000');
+            }
+
+            return args;
+        }
+
+        function performanceArgs() {
+            const perf = performanceMode.value;
+            if (perf === 'cpu') {
+                return ['--no-gpu'];
+            }
+            if (perf === 'scalar') {
+                return ['--no-simd', '--no-gpu'];
+            }
+            if (perf === 'debug') {
+                return ['-v', '--diagnostic'];
+            }
+            return [];
+        }
+
+        function goalArgs() {
+            const goal = goalType.value;
+            if (goal === 'web') {
+                return ['--web'];
+            }
+            if (goal === 'acars') {
+                return ['--acars'];
+            }
+            if (goal === 'gsmtap') {
+                return ['--gsmtap'];
+            }
+            if (goal === 'position') {
+                return ['--position'];
+            }
+            if (goal === 'parsed') {
+                return ['--parsed'];
+            }
+            return [];
+        }
+
+        function extraArgs() {
+            const extra = extraType.value;
+            if (extra === 'feed') {
+                return ['--feed', '--station=MYSTATION'];
+            }
+            if (extra === 'zmq') {
+                return ['--zmq'];
+            }
+            if (extra === 'save') {
+                return ['--save-bursts bursts/'];
+            }
+            return [];
+        }
+
+        function buildCommand() {
+            if (goalType.value === 'mission-control') {
+                const cmd = './Start-MissionControl.ps1';
+                generatedCommand.textContent = cmd;
+                commandTitle.textContent = 'Generated Mission Control launch command';
+                commandExplanation.textContent = 'Use the PowerShell launcher when you want the browser GUI. It prepares the GUI environment in WSL and opens the selected local port.';
+                return;
+            }
+
+            const parts = [baseSource(), ...sampleArgs(), ...performanceArgs(), ...goalArgs(), ...extraArgs()];
+            const compact = Array.from(new Set(parts.filter(Boolean))).join(' ');
+            generatedCommand.textContent = compact;
+            commandTitle.textContent = 'Generated operating command';
+
+            const explanations = {
+                raw: 'Base decode mode is the right first test. It validates source input, capture path, and demodulation before adding higher-level features.',
+                web: 'Web mode starts the built-in HTTP map server. Open the reported port in a browser after the sniffer is running.',
+                acars: 'ACARS mode decodes aviation and SBD traffic carried in IDA frames without relying on external Python pipelines.',
+                gsmtap: 'GSMTAP mode sends IDA frames to Wireshark over UDP. Verify the destination host and port if packets do not appear.',
+                position: 'Position mode estimates receiver coordinates from Doppler measurements. Expect this to need time and multiple satellites before converging.',
+                parsed: 'Parsed mode outputs internal IDA parses directly. It is useful when your downstream workflow only needs data-bearing frames.'
+            };
+
+            commandExplanation.textContent = explanations[goalType.value] || 'Generated from your selected operating profile.';
+        }
+
+        function copyText(targetId) {
+            const element = document.getElementById(targetId);
+            const text = element ? element.textContent : '';
+            if (!text) {
+                return;
+            }
+
+            navigator.clipboard.writeText(text).then(() => {
+                const button = document.querySelector('[data-copy-target="' + targetId + '"]');
+                if (!button) {
+                    return;
+                }
+                const original = button.textContent;
+                button.textContent = 'Copied';
+                window.setTimeout(() => {
+                    button.textContent = original;
+                }, 1400);
+            });
+        }
+
+        document.querySelectorAll('[data-copy-target]').forEach((button) => {
+            button.addEventListener('click', () => copyText(button.dataset.copyTarget));
+        });
+
+        [inputType, hardwareType, goalType, performanceMode, sampleProfile, extraType].forEach((element) => {
+            element.addEventListener('change', buildCommand);
+        });
+
+        function filterTroubleshooting() {
+            const query = troubleSearch.value.trim().toLowerCase();
+            let visible = 0;
+
+            troubleItems.forEach((item) => {
+                const haystack = (item.textContent + ' ' + item.dataset.search).toLowerCase();
+                const match = !query || haystack.includes(query);
+                item.classList.toggle('hidden', !match);
+                if (match) {
+                    visible += 1;
+                }
+            });
+
+            troubleCount.textContent = visible + ' of ' + troubleItems.length;
+        }
+
+        troubleSearch.addEventListener('input', filterTroubleshooting);
+
+        const navLinks = Array.from(document.querySelectorAll('.nav-link'));
+        const observedSections = navLinks
+            .map((link) => document.querySelector(link.getAttribute('href')))
+            .filter(Boolean);
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach((entry) => {
+                if (!entry.isIntersecting) {
+                    return;
+                }
+                const id = '#' + entry.target.id;
+                navLinks.forEach((link) => link.classList.toggle('active', link.getAttribute('href') === id));
+            });
+        }, { rootMargin: '-35% 0px -50% 0px', threshold: 0.05 });
+
+        observedSections.forEach((section) => observer.observe(section));
+
+        buildCommand();
+        filterTroubleshooting();
+    </script>
+</body>
+</html>

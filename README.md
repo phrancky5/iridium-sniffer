@@ -27,6 +27,9 @@ Native GSMTAP output (`--gsmtap`) sends decoded IDA (Iridium Data) frames direct
 - GPU-accelerated FFT burst detection (OpenCL or Vulkan)
 - ZMQ PUB/SUB output (`--zmq`) for multi-consumer iridium-toolkit compatibility
 - ZMQ SUB and VITA 49 (VRT) network IQ input for remote SDR and distributed setups
+- VITA 49 auto-configuration from VRT context packets (sample rate, frequency, format)
+- SigMF metadata support for zero-config IQ file playback
+- Mission Control GUI with 3D satellite globe (CesiumJS + satellite.js)
 - Multi-threaded architecture: detection, downmix pool, demodulation, stats
 - HackRF, BladeRF, USRP, SDRplay, and SoapySDR support
 - Reads ci8, ci16, and cf32 IQ files with auto-detection from file extension
@@ -70,7 +73,7 @@ sudo apt install libacars-dev        # libacars-2
 sudo apt install libzmq3-dev         # --zmq flag
 
 # Optional: GPU-accelerated burst detection
-sudo apt install ocl-icd-opencl-dev  # OpenCL (NVIDIA, AMD, Intel)
+sudo apt install opencl-headers ocl-icd-opencl-dev  # OpenCL (NVIDIA, AMD, Intel)
 
 mkdir build && cd build
 cmake ..
@@ -971,6 +974,77 @@ This output is consumed directly by [iridium-toolkit](https://github.com/muccc/i
 
 stderr shows a status line once per second in the same format as gr-iridium, so existing monitoring scripts work without changes.
 
+## Mission Control GUI
+
+The Mission Control GUI provides a full-featured browser-based interface for controlling iridium-sniffer, viewing live data, and visualizing the Iridium satellite constellation in 3D.
+
+### Starting Mission Control
+
+**Windows (PowerShell):**
+
+```powershell
+.\Start-MissionControl.ps1            # default port 5050
+.\Start-MissionControl.ps1 -Port 8080 # custom port
+```
+
+**WSL / Linux:**
+
+```bash
+cd gui
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python3 app.py 5050
+```
+
+Then open `http://localhost:5050` in a browser.
+
+### GUI Tabs
+
+| Tab | Description |
+|-----|-------------|
+| RAW Output | Live stream of demodulated RAW lines from stdout |
+| System Log | stderr stats, verbose diagnostics, and GUI messages |
+| Spectrum | Live RF spectrum showing detected burst activity |
+| Constellation | DQPSK I/Q scatter plot showing demodulation quality |
+| Decoded Data | Structured frame table with type filtering and SNR |
+| 3D Globe | Iridium satellite constellation visualization (CesiumJS) |
+
+### 3D Globe Tab
+
+The 3D Globe tab renders all 66 Iridium NEXT satellites at their real orbital positions using CesiumJS for 3D Earth rendering and satellite.js for SGP4 orbital propagation. TLE data is fetched from CelesTrak and cached for 6 hours.
+
+Features:
+- Real-time satellite positions updated via SGP4 propagation
+- Ground track orbit paths per satellite
+- Beam coverage ellipses (2,350 km radius per sat)
+- Live web map data overlay — beams, MT positions, aircraft tracks, receiver, and satellite positions projected onto the 3D globe
+- Sighted satellite filter — only satellites currently detected by the receiver are shown (driven by web map data)
+- Observer location marker with satellite visibility count
+- Map style switching (Satellite / OpenStreetMap / Dark)
+- Enable/disable globe toggle without losing state
+- Live and Session Time modes
+- Lazy loading — CesiumJS (~4 MB) is only downloaded when the tab is first opened
+
+When Doppler positioning is active (`--position`), solved receiver coordinates are automatically set as the observer location on the globe.
+
+### API Endpoints (Mission Control)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/status` | Sniffer process status and stats |
+| GET | `/api/devices` | List available SDR devices |
+| POST | `/api/start` | Start sniffer with configuration |
+| POST | `/api/stop` | Stop running sniffer |
+| GET | `/api/tles` | Iridium NEXT TLE data (6h cache) |
+| POST | `/api/tles/refresh` | Force TLE re-fetch from CelesTrak |
+| GET/POST | `/api/observer` | Get or set observer location |
+| GET | `/api/webmap/state` | Proxy to web map C binary state (beams, MT, aircraft, sats) |
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for version history and release notes.
+
 ## Architecture
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for design documentation covering the signal processing pipeline, threading model, frame decoder internals, and demod optimization history.
@@ -988,3 +1062,6 @@ This project builds on the work of several open-source projects:
 - [VkFFT](https://github.com/DTolm/VkFFT) (MIT) by Dmitrii Tolmachev -- header-only GPU FFT library used for both OpenCL and Vulkan burst detection
 - [iridium-toolkit](https://github.com/muccc/iridium-toolkit) (BSD-2-Clause) by Sec and schneider42 -- the downstream frame parser and reassembler, and the reference implementation for BCH error correction and de-interleaving algorithms
 - [libacars](https://github.com/szpajder/libacars) (MIT) by Tomasz Lemiech (szpajder) -- optional dependency for ARINC-622, ADS-C, and CPDLC decoding within ACARS messages
+- [CesiumJS](https://cesium.com/cesiumjs/) (Apache-2.0) by Cesium GS, Inc. -- 3D globe rendering for Mission Control satellite visualization
+- [satellite.js](https://github.com/shashwatak/satellite-js) (MIT) by Shashwat Kandadai -- SGP4/SDP4 propagator for client-side satellite position computation
+- [cJSON](https://github.com/DaveGamble/cJSON) (MIT) by Dave Gamble -- vendored JSON parser for SigMF metadata support

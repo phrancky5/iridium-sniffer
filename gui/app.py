@@ -1,5 +1,5 @@
 """
-iridium-sniffer Mission Control — NXC2 Edition
+iridium-sniffer Mission Control v1.2 — NXC2 Edition
 Analyst, Coder & Architect: Max Elevation
 
 Flask + Socket.IO backend
@@ -12,6 +12,7 @@ All state lives in this process. Nothing is installed system-wide.
 """
 
 import json
+import json as _json
 import os
 import re
 import signal
@@ -19,6 +20,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
 from pathlib import Path
 
 from flask import Flask, render_template, request, jsonify
@@ -32,9 +34,97 @@ PROJECT_DIR = GUI_DIR.parent
 BUILD_DIR = PROJECT_DIR / "build"
 BINARY = BUILD_DIR / "iridium-sniffer"
 
-app = Flask(__name__, template_folder=str(GUI_DIR / "templates"))
+app = Flask(__name__,
+    template_folder=str(GUI_DIR / "templates"),
+    static_folder=str(GUI_DIR / "static"),
+    static_url_path="/static"
+)
 app.config["SECRET_KEY"] = os.urandom(24)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+
+# ---------------------------------------------------------------------------
+# TLE cache (6-hour TTL)
+# ---------------------------------------------------------------------------
+_tle_cache = {"tles": [], "fetched_at": 0}
+_tle_lock = threading.Lock()
+TLE_TTL_S = 6 * 3600  # 6 hours
+CELESTRAK_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=iridium-NEXT&FORMAT=tle"
+
+# Observer location (persisted to JSON file)
+OBSERVER_FILE = GUI_DIR / "observer_location.json"
+
+
+def _load_observer():
+    """Load observer location from JSON file."""
+    if OBSERVER_FILE.exists():
+        try:
+            with open(OBSERVER_FILE, "r") as f:
+                return _json.load(f)
+        except Exception:
+            pass
+    return None
+
+
+def _save_observer(loc):
+    """Save observer location to JSON file."""
+    try:
+        with open(OBSERVER_FILE, "w") as f:
+            _json.dump(loc, f)
+    except Exception as e:
+        print(f"Warning: could not save observer location: {e}")
+
+
+def _fetch_tles():
+    """Fetch Iridium NEXT TLEs from CelesTrak."""
+    req = urllib.request.Request(
+        CELESTRAK_URL,
+        headers={"User-Agent": "IridiumSniffer-MissionControl/1.0"}
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        data = resp.read(512_000).decode("utf-8", errors="replace")
+
+    lines = [l.strip() for l in data.strip().split("\n") if l.strip()]
+    tles = []
+    i = 0
+    while i + 2 < len(lines):
+        name = lines[i]
+        tle1 = lines[i + 1]
+        tle2 = lines[i + 2]
+        if tle1.startswith("1 ") and tle2.startswith("2 "):
+            try:
+                norad = int(tle1[2:7])
+            except ValueError:
+                norad = 0
+            tles.append({
+                "name": name,
+                "norad": norad,
+                "tle1": tle1,
+                "tle2": tle2,
+            })
+            i += 3
+        else:
+            i += 1
+    return tles
+
+
+def _ensure_tles():
+    """Return cached TLEs, refreshing from CelesTrak if stale (>6h)."""
+    now = time.time()
+    with _tle_lock:
+        if _tle_cache["tles"] and (now - _tle_cache["fetched_at"]) < TLE_TTL_S:
+            return _tle_cache["tles"]
+    # Fetch outside lock
+    try:
+        tles = _fetch_tles()
+        with _tle_lock:
+            _tle_cache["tles"] = tles
+            _tle_cache["fetched_at"] = time.time()
+        return tles
+    except Exception as e:
+        print(f"TLE fetch failed: {e}")
+        with _tle_lock:
+            return _tle_cache["tles"]  # Return stale data if available
+
 
 # ---------------------------------------------------------------------------
 # Process state
@@ -45,6 +135,7 @@ sniffer_thread = None        # stdout reader thread
 stderr_thread = None         # stderr reader thread
 start_time = None
 is_running = False
+webmap_port = None           # port for C binary's --web server (if enabled)
 
 # Stats parsed from stderr status line
 stats = {
@@ -355,8 +446,13 @@ def stdout_reader(proc):
         socketio.emit("status", {"running": False, "message": "Process ended"})
 
 
+POSITION_RE = re.compile(
+    r'POS:\s+([-\d.]+)\s+([-\d.]+)\s+([\d.]+)\s+HDOP:\s*([\d.]+)'
+)
+
+
 def stderr_reader(proc):
-    """Read stderr (stats + verbose) and push to websocket."""
+    """Read stderr (stats + verbose + position) and push to websocket."""
     global stats
     try:
         for line in iter(proc.stderr.readline, ""):
@@ -364,6 +460,19 @@ def stderr_reader(proc):
                 break
             line_str = line.strip()
             if not line_str:
+                continue
+
+            # Check for position solution
+            pos_m = POSITION_RE.search(line_str)
+            if pos_m:
+                pos = {
+                    "lat": float(pos_m.group(1)),
+                    "lon": float(pos_m.group(2)),
+                    "alt": float(pos_m.group(3)),
+                    "hdop": float(pos_m.group(4)),
+                }
+                _save_observer(pos)
+                socketio.emit("position", pos)
                 continue
 
             parsed = parse_stats_line(line_str)
@@ -402,6 +511,65 @@ def api_devices():
     return jsonify(find_devices())
 
 
+@app.route("/api/tles")
+def api_tles():
+    """Return Iridium NEXT TLEs for client-side globe rendering."""
+    tles = _ensure_tles()
+    observer = _load_observer()
+    age_min = (time.time() - _tle_cache.get("fetched_at", 0)) / 60
+    return jsonify({
+        "status": "success",
+        "tles": tles,
+        "observer": observer,
+        "tle_age_min": round(age_min, 1),
+    })
+
+
+@app.route("/api/tles/refresh", methods=["POST"])
+def api_tles_refresh():
+    """Force re-fetch TLEs from CelesTrak (bypass cache)."""
+    try:
+        tles = _fetch_tles()
+        with _tle_lock:
+            _tle_cache["tles"] = tles
+            _tle_cache["fetched_at"] = time.time()
+        return jsonify({
+            "status": "success",
+            "message": f"Fetched {len(tles)} Iridium NEXT TLEs",
+            "tle_count": len(tles),
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 503
+
+
+@app.route("/api/observer", methods=["GET", "POST"])
+def api_observer():
+    """Get or set observer location."""
+    if request.method == "GET":
+        loc = _load_observer()
+        return jsonify({
+            "status": "success",
+            "location": loc,
+            "configured": loc is not None,
+        })
+    data = request.get_json(force=True, silent=True) or {}
+    lat = data.get("lat")
+    lon = data.get("lon")
+    if lat is None or lon is None:
+        return jsonify({"status": "error", "message": "lat and lon required"}), 400
+    try:
+        loc = {
+            "lat": float(lat),
+            "lon": float(lon),
+            "alt": float(data.get("alt", 0)),
+            "name": str(data.get("name", "Observer"))[:100],
+        }
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "Invalid coordinates"}), 400
+    _save_observer(loc)
+    return jsonify({"status": "success", "location": loc})
+
+
 @app.route("/api/start", methods=["POST"])
 def api_start():
     global sniffer_proc, sniffer_thread, stderr_thread, start_time, is_running, stats
@@ -422,6 +590,16 @@ def api_start():
         "queue_max": 0, "dropped": 0, "elapsed": 0, "raw_line": "",
     }
 
+    # Kill any orphaned iridium-sniffer processes that may be holding ports
+    try:
+        subprocess.run(
+            ["pkill", "-9", "-f", str(BINARY)],
+            capture_output=True, timeout=3
+        )
+        time.sleep(0.3)  # brief wait for ports to release
+    except Exception:
+        pass
+
     try:
         sniffer_proc = subprocess.Popen(
             cmd,
@@ -439,6 +617,13 @@ def api_start():
     is_running = True
     start_time = time.time()
 
+    # Track web map port for proxy endpoint
+    global webmap_port
+    if config.get("web_map"):
+        webmap_port = int(config.get("web_port", 8888))
+    else:
+        webmap_port = None
+
     sniffer_thread = threading.Thread(target=stdout_reader, args=(sniffer_proc,), daemon=True)
     sniffer_thread.start()
 
@@ -452,7 +637,7 @@ def api_start():
 
 @app.route("/api/stop", methods=["POST"])
 def api_stop():
-    global sniffer_proc, is_running
+    global sniffer_proc, is_running, webmap_port
 
     if not is_running or sniffer_proc is None:
         return jsonify({"error": "Not running"}), 409
@@ -462,14 +647,125 @@ def api_stop():
     except ProcessLookupError:
         pass
 
-    sniffer_proc.wait(timeout=5)
+    try:
+        sniffer_proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        # Process didn't exit cleanly — force kill to release ports
+        try:
+            os.killpg(os.getpgid(sniffer_proc.pid), signal.SIGKILL)
+            sniffer_proc.wait(timeout=3)
+        except (ProcessLookupError, subprocess.TimeoutExpired):
+            pass
+
     is_running = False
     sniffer_proc = None
-    start_time_val = None
+    webmap_port = None
 
     socketio.emit("status", {"running": False, "message": "Stopped by user"})
 
     return jsonify({"ok": True})
+
+
+@app.route("/api/wireshark", methods=["POST"])
+def api_wireshark():
+    """Launch Wireshark listening for GSMTAP packets on UDP 4729."""
+    import shutil
+
+    ws_bin = shutil.which("wireshark")
+    is_windows_exe = False
+
+    # When running inside WSL, wireshark won't be on the Linux PATH.
+    # Try common Windows install locations via the /mnt/c mount.
+    if not ws_bin:
+        for candidate in [
+            "/mnt/c/Program Files/Wireshark/Wireshark.exe",
+            "/mnt/c/Program Files (x86)/Wireshark/Wireshark.exe",
+        ]:
+            if os.path.isfile(candidate):
+                ws_bin = candidate
+                is_windows_exe = True
+                break
+
+    if not ws_bin:
+        return jsonify({"error": "Wireshark not found in PATH or Program Files"}), 404
+
+    # For Linux/WSL wireshark, dumpcap needs cap_net_raw to capture.
+    # Check via getcap and attempt auto-fix with passwordless sudo.
+    # setcap refuses symlinks, so resolve to the real file first.
+    if not is_windows_exe:
+        dumpcap = shutil.which("dumpcap")
+        if dumpcap:
+            dumpcap_real = os.path.realpath(dumpcap)
+            needs_fix = True
+            try:
+                caps = subprocess.run(
+                    ["getcap", dumpcap_real],
+                    capture_output=True, text=True, timeout=5
+                )
+                if "cap_net_raw" in caps.stdout:
+                    needs_fix = False
+            except Exception:
+                pass
+
+            if needs_fix:
+                # Try passwordless sudo to set capabilities automatically.
+                try:
+                    fix = subprocess.run(
+                        ["sudo", "-n", "setcap",
+                         "cap_net_raw,cap_net_admin=eip", dumpcap_real],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    if fix.returncode != 0:
+                        return jsonify({
+                            "error": "dumpcap lacks capture permission. "
+                                     "Run once in WSL terminal: "
+                                     "sudo setcap cap_net_raw,cap_net_admin=eip "
+                                     + dumpcap_real
+                        }), 500
+                except Exception:
+                    return jsonify({
+                        "error": "dumpcap lacks capture permission. "
+                                 "Run once in WSL terminal: "
+                                 "sudo setcap cap_net_raw,cap_net_admin=eip "
+                                 + dumpcap_real
+                    }), 500
+
+    # Build command: -k starts capture immediately, -i selects interface,
+    # -f sets capture filter.  On Linux use 'lo' (loopback); on Windows
+    # the Npcap loopback adapter is auto-selected when no -i is given,
+    # but we still pass -i to avoid the default-interface permission issue.
+    if is_windows_exe:
+        cmd = [ws_bin, "-k", "-f", "udp port 4729"]
+    else:
+        cmd = [ws_bin, "-k", "-i", "lo", "-f", "udp port 4729"]
+
+    try:
+        subprocess.Popen(
+            cmd, start_new_session=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except PermissionError:
+        return jsonify({
+            "error": "Permission denied launching Wireshark"
+        }), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"ok": True})
+
+
+@app.route("/api/webmap/state")
+def api_webmap_state():
+    """Proxy the C binary's /api/state web map endpoint."""
+    if not is_running or webmap_port is None:
+        return jsonify({"error": "Web map not active"}), 503
+    try:
+        url = f"http://127.0.0.1:{webmap_port}/api/state"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = resp.read()
+        return app.response_class(data, mimetype="application/json")
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
 
 
 # ---------------------------------------------------------------------------
@@ -490,8 +786,8 @@ def ws_connect():
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
-    print(f"\n  iridium-sniffer Mission Control — NXC2 Edition")
-    print(f"  ================================================")
+    print(f"\n  iridium-sniffer Mission Control v1.2 — NXC2 Edition")
+    print(f"  =====================================================")
     print(f"  Forked from: https://github.com/alphafox02/iridium-sniffer")
     print(f"  Open in browser: http://localhost:{port}")
     print(f"  Binary: {BINARY}")

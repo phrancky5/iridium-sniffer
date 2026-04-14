@@ -849,9 +849,12 @@ int main(int argc, char **argv) {
 #ifdef HAVE_ZMQ
     if (zmq_enabled) {
         const char *ep = zmq_endpoint ? zmq_endpoint : ZMQ_DEFAULT_ENDPOINT;
-        if (frame_output_zmq_init(ep) != 0)
-            errx(1, "Failed to bind ZMQ PUB socket on %s", ep);
-        fprintf(stderr, "ZMQ: publishing on %s\n", ep);
+        if (frame_output_zmq_init(ep) != 0) {
+            fprintf(stderr, "WARNING: Failed to bind ZMQ PUB on %s — continuing without ZMQ\n", ep);
+            zmq_enabled = 0;
+        } else {
+            fprintf(stderr, "ZMQ: publishing on %s\n", ep);
+        }
     }
 #endif
 
@@ -872,13 +875,17 @@ int main(int argc, char **argv) {
     }
 
     if (web_enabled) {
-        if (web_map_init(web_port) != 0)
-            errx(1, "Failed to start web map server on port %d", web_port);
+        if (web_map_init(web_port) != 0) {
+            fprintf(stderr, "WARNING: Web map failed on port %d — continuing without web map\n", web_port);
+            web_enabled = 0;
+        }
     }
 
     if (gsmtap_enabled) {
-        if (gsmtap_init(gsmtap_host, gsmtap_port) != 0)
-            errx(1, "Failed to initialize GSMTAP socket");
+        if (gsmtap_init(gsmtap_host, gsmtap_port) != 0) {
+            fprintf(stderr, "WARNING: GSMTAP init failed — continuing without GSMTAP\n");
+            gsmtap_enabled = 0;
+        }
     }
 
     if (acars_enabled) {
@@ -1107,6 +1114,27 @@ int main(int argc, char **argv) {
 #endif
     }
 
+    /* Release network sockets immediately so ports are free on restart.
+     * This must happen before draining queues, which can take seconds. */
+    if (web_enabled)
+        web_map_shutdown();
+
+#ifdef HAVE_ZMQ
+    if (zmq_enabled)
+        frame_output_zmq_shutdown();
+#endif
+
+    if (gsmtap_enabled) {
+        fprintf(stderr, "iridium-sniffer: sent %lu GSMTAP packets\n",
+                atomic_load(&gsmtap_sent_count));
+        gsmtap_shutdown();
+    }
+
+    if (acars_enabled) {
+        acars_print_stats();
+        acars_shutdown();
+    }
+
     /* Drain queues and join threads in pipeline order */
     blocking_queue_close(&samples_queue);
     if (!live && in_file != NULL)
@@ -1138,25 +1166,6 @@ int main(int argc, char **argv) {
     blocking_queue_close(&output_queue);
     pthread_join(output_worker, NULL);
     pthread_join(stats, NULL);
-
-    if (web_enabled)
-        web_map_shutdown();
-
-    if (gsmtap_enabled) {
-        fprintf(stderr, "iridium-sniffer: sent %lu GSMTAP packets\n",
-                atomic_load(&gsmtap_sent_count));
-        gsmtap_shutdown();
-    }
-
-    if (acars_enabled) {
-        acars_print_stats();
-        acars_shutdown();
-    }
-
-#ifdef HAVE_ZMQ
-    if (zmq_enabled)
-        frame_output_zmq_shutdown();
-#endif
 
     if (in_file != NULL)
         fclose(in_file);

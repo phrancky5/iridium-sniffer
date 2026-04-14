@@ -117,6 +117,10 @@ int frame_output_zmq_init(const char *endpoint)
         return -1;
     }
 
+    /* Set linger to 0 so zmq_close releases the port immediately */
+    int linger = 0;
+    zmq_setsockopt(zmq_pub_socket, ZMQ_LINGER, &linger, sizeof(linger));
+
     if (zmq_bind(zmq_pub_socket, endpoint) != 0) {
         zmq_close(zmq_pub_socket);
         zmq_ctx_destroy(zmq_context);
@@ -130,10 +134,11 @@ int frame_output_zmq_init(const char *endpoint)
 
 void frame_output_zmq_shutdown(void)
 {
-    if (zmq_pub_socket) {
-        zmq_close(zmq_pub_socket);
-        zmq_pub_socket = NULL;
-    }
+    /* NULL the pointer first to prevent sends from other threads */
+    void *sock = zmq_pub_socket;
+    zmq_pub_socket = NULL;
+    if (sock)
+        zmq_close(sock);
     if (zmq_context) {
         zmq_ctx_destroy(zmq_context);
         zmq_context = NULL;
