@@ -287,15 +287,20 @@ void basestation_send_position(const char *reg, const char *flight,
     /* Build MSG,3 line */
     char msg[512];
     int len;
+    /* SBS MSG,3 format (22 fields):
+     * MSG,3,SessionID,AircraftID,HexIdent,FlightID,
+     * DateGen,TimeGen,DateLog,TimeLog,
+     * Callsign,Alt,GS,Track,Lat,Lon,VR,
+     * Squawk,Alert,Emergency,SPI,IsOnGround */
     if (alt_ft > -99999) {
         len = snprintf(msg, sizeof(msg),
-            "MSG,3,1,1,%s,1,%s,%s,%s,%s,%s,%d,,,%.6f,%.6f,,,,0\r\n",
+            "MSG,3,1,1,%s,1,%s,%s,%s,%s,%s,%d,,,%.6f,%.6f,,,,,,0\r\n",
             hex, datestamp, timestamp, datestamp, timestamp,
             (flight && flight[0]) ? flight : "",
             alt_ft, lat, lon);
     } else {
         len = snprintf(msg, sizeof(msg),
-            "MSG,3,1,1,%s,1,%s,%s,%s,%s,%s,,,,%.6f,%.6f,,,,0\r\n",
+            "MSG,3,1,1,%s,1,%s,%s,%s,%s,%s,,,,%.6f,%.6f,,,,,,0\r\n",
             hex, datestamp, timestamp, datestamp, timestamp,
             (flight && flight[0]) ? flight : "",
             lat, lon);
