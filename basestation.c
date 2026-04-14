@@ -118,12 +118,16 @@ static int bs_client_connect(void)
 
     if (inet_pton(AF_INET, bs_remote_host, &addr.sin_addr) != 1) {
         /* Try DNS resolution */
-        struct hostent *he = gethostbyname(bs_remote_host);
-        if (!he) {
+        struct addrinfo hints = { .ai_family = AF_INET, .ai_socktype = SOCK_STREAM };
+        struct addrinfo *res = NULL;
+        if (getaddrinfo(bs_remote_host, NULL, &hints, &res) != 0 || !res) {
             close(fd);
             return -1;
         }
-        memcpy(&addr.sin_addr, he->h_addr_list[0], he->h_length);
+        memcpy(&addr.sin_addr,
+               &((struct sockaddr_in *)res->ai_addr)->sin_addr,
+               sizeof(addr.sin_addr));
+        freeaddrinfo(res);
     }
 
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {

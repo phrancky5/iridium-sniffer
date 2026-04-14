@@ -466,6 +466,7 @@ void *vita49_thread(void *arg)
             num_samples = payload_bytes / 8;
             if (num_samples == 0) continue;
             s = malloc(sizeof(*s) + num_samples * 8);
+            if (!s) continue;
             s->format = SAMPLE_FMT_FLOAT;
             const uint32_t *src32 = (const uint32_t *)payload;
             uint32_t *dst32 = (uint32_t *)s->samples;
@@ -479,6 +480,7 @@ void *vita49_thread(void *arg)
             num_samples = payload_bytes / 4;
             if (num_samples == 0) continue;
             s = malloc(sizeof(*s) + num_samples * 2);
+            if (!s) continue;
             s->format = SAMPLE_FMT_INT8;
             const int16_t *src = (const int16_t *)payload;
             for (size_t i = 0; i < num_samples * 2; i++)
@@ -492,6 +494,7 @@ void *vita49_thread(void *arg)
             num_samples = payload_bytes / 2;
             if (num_samples == 0) continue;
             s = malloc(sizeof(*s) + num_samples * 2);
+            if (!s) continue;
             s->format = SAMPLE_FMT_INT8;
             memcpy(s->samples, payload, num_samples * 2);
             break;

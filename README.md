@@ -862,6 +862,14 @@ VITA 49:
     --vita49[=IP:PORT]      receive IQ via VITA 49 (VRT) UDP (default: 0.0.0.0:4991)
                              auto-detects -r, -c, and format from VRT context packets
 
+BaseStation:
+    --basestation[=PORT]    SBS server on PORT (default 30003, tools connect in)
+    --basestation=HOST:PORT SBS push to remote host (auto-reconnect)
+    --basestation-beam      include beam-estimated positions (~200 km accuracy)
+                             (default: only GPS-quality positions are sent)
+    --aircraft-db=PATH      aircraft database CSV (default: ~/.iridium-sniffer/aircraft.csv)
+    --update-db             download/update aircraft database from tar1090-db and exit
+
 Output:
     --file-info=STR         file info string for RAW output (default: auto)
     --parsed                output parsed IDA lines (bypass iridium-parser.py)

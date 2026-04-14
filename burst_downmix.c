@@ -153,12 +153,14 @@ static void generate_sync_word(burst_downmix_t *dm, const int *uw, int uw_len,
         /* Uplink preamble: alternating s1, s0 pairs */
         total_symbols = preamble_len + uw_len;
         symbols = calloc(total_symbols, sizeof(float complex));
+        if (!symbols) return;
         for (int i = 0; i < preamble_len; i++)
             symbols[i] = (i % 2 == 0) ? s1 : s0;
     } else {
         /* Downlink preamble: all s0 */
         total_symbols = preamble_len + uw_len;
         symbols = calloc(total_symbols, sizeof(float complex));
+        if (!symbols) return;
         for (int i = 0; i < preamble_len; i++)
             symbols[i] = s0;
     }
@@ -172,6 +174,7 @@ static void generate_sync_word(burst_downmix_t *dm, const int *uw, int uw_len,
     int isps = (int)roundf(sps);
     int padded_len = total_symbols * isps - (isps - 1);
     float complex *padded = calloc(padded_len, sizeof(float complex));
+    if (!padded) { free(symbols); return; }
     for (int i = 0; i < total_symbols; i++)
         padded[i * isps] = symbols[i];
     free(symbols);
@@ -180,9 +183,11 @@ static void generate_sync_word(burst_downmix_t *dm, const int *uw, int uw_len,
     int half_rc = (dm->rc_fir->ntaps - 1) / 2;
     int buf_len = padded_len + dm->rc_fir->ntaps - 1;
     float complex *buf = calloc(buf_len, sizeof(float complex));
+    if (!buf) { free(padded); return; }
     memcpy(buf + half_rc, padded, padded_len * sizeof(float complex));
 
     float complex *shaped = malloc(padded_len * sizeof(float complex));
+    if (!shaped) { free(buf); free(padded); return; }
     fir_filter_ccf(dm->rc_fir, shaped, buf, padded_len);
     free(buf);
     free(padded);

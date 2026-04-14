@@ -85,6 +85,11 @@ int sigmf_read_meta(const char *meta_path,
     }
     size_t nread = fread(json_str, 1, fsize, f);
     fclose(f);
+    if (nread == 0) {
+        free(json_str);
+        fprintf(stderr, "sigmf: failed to read %s\n", meta_path);
+        return -1;
+    }
     json_str[nread] = '\0';
 
     /* Parse JSON */
