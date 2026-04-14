@@ -544,6 +544,8 @@
                     <span class="chip">ACARS/SBD</span>
                     <span class="chip">Wireshark GSMTAP</span>
                     <span class="chip">Doppler positioning</span>
+                    <span class="chip">BaseStation SBS</span>
+                    <span class="chip">CSV export</span>
                 </div>
             </section>
 
@@ -551,7 +553,7 @@
                 <div class="section-head">
                     <div>
                         <h3>What This Project Does</h3>
-                        <p>iridium-sniffer is a standalone C-based Iridium burst detector and demodulator. It reads live IQ from SDR hardware or IQ files, detects bursts, demodulates them, and emits iridium-toolkit compatible RAW output. Optional features add ACARS/SBD decoding, a live web map, Mission Control GUI, GSMTAP output for Wireshark, ZMQ integration, VITA 49 input, and Doppler-based receiver positioning.</p>
+                        <p>iridium-sniffer is a standalone C-based Iridium burst detector and demodulator. It reads live IQ from SDR hardware or IQ files, detects bursts, demodulates them, and emits iridium-toolkit compatible RAW output. Optional features add ACARS/SBD decoding (with text position extraction and waypoint lookup), a live web map with CSV paging export, Mission Control GUI, GSMTAP output for Wireshark, ZMQ integration, VITA 49 input, BaseStation SBS feed for ADS-B trackers, and Doppler-based receiver positioning.</p>
                     </div>
                 </div>
                 <div class="facts-grid">
@@ -615,6 +617,7 @@
                                 <option value="gsmtap">Wireshark GSMTAP</option>
                                 <option value="position">Doppler positioning</option>
                                 <option value="parsed">Parsed IDA output</option>
+                                <option value="basestation">BaseStation SBS feed</option>
                                 <option value="mission-control">Mission Control GUI</option>
                             </select>
                         </label>
@@ -686,7 +689,7 @@
 
                     <article class="grid-card">
                         <h4>3. ACARS / SBD</h4>
-                        <p>Decodes IDA-carried aviation and short burst data directly in the binary. No Python pipeline required.</p>
+                        <p>Decodes IDA-carried aviation and short burst data directly in the binary. No Python pipeline required. Extracts aircraft positions from ADS-C structured data, ACARS free text coordinates (three format variants), and waypoint database lookups. Now also accepts uplink IDA frames (ft=6/7) in addition to downlink.</p>
                         <pre>./iridium-sniffer -i soapy-0 --acars</pre>
                     </article>
 
@@ -706,6 +709,23 @@
                         <h4>6. Parsed output</h4>
                         <p>Emits parsed IDA lines to stdout for reassembler workflows. Non-IDA frames remain as RAW lines.</p>
                         <pre>./iridium-sniffer -i soapy-0 --parsed</pre>
+                    </article>
+
+                    <article class="grid-card">
+                        <h4>7. BaseStation SBS feed</h4>
+                        <p>Outputs decoded aircraft positions in MSG,3 BaseStation format on a TCP server (default port 30003). VRS, tar1090, PlanePlotter, and other ADS-B tracking tools can connect and receive Iridium-derived aircraft positions alongside ADS-B data. Aircraft registrations are mapped to real ICAO hex addresses using a 568K-entry tar1090-db aircraft database. Groundspeed and heading are derived from consecutive position fixes.</p>
+                        <pre>./iridium-sniffer -i soapy-0 --acars --basestation</pre>
+                        <div class="chip-row">
+                            <span class="chip">4-tier position priority</span>
+                            <span class="chip">ICAO hex mapping</span>
+                            <span class="chip">GS + heading</span>
+                        </div>
+                    </article>
+
+                    <article class="grid-card">
+                        <h4>8. CSV paging export</h4>
+                        <p>The web map now accumulates paging events (TMSI, satellite, beam, position, timestamp) in the browser and provides an Export Pages CSV button on the dashboard bar for offline analysis and AIS correlation.</p>
+                        <pre>./iridium-sniffer -i soapy-0 --web --acars</pre>
                     </article>
                 </div>
             </section>
@@ -826,6 +846,30 @@
                                 <td>iridium-toolkit compatible demodulated frames.</td>
                                 <td>Switch to ZMQ PUB when you want multiple consumers.</td>
                             </tr>
+                            <tr>
+                                <td>BaseStation port</td>
+                                <td>30003</td>
+                                <td>TCP server for SBS MSG,3 aircraft position output. tar1090, VRS, and PlanePlotter connect here.</td>
+                                <td>Change with --basestation=PORT or push to a remote host with --basestation=HOST:PORT.</td>
+                            </tr>
+                            <tr>
+                                <td>--basestation-beam</td>
+                                <td>off</td>
+                                <td>When enabled, beam-estimated positions (~200 km accuracy) are also sent via the SBS feed. Default sends only GPS-quality positions (ADS-C, free text, waypoint).</td>
+                                <td>Enable when you want approximate coverage in tar1090 and accept reduced accuracy.</td>
+                            </tr>
+                            <tr>
+                                <td>Aircraft database</td>
+                                <td>~/.iridium-sniffer/aircraft.csv</td>
+                                <td>Maps aircraft registrations to ICAO hex addresses (568K entries from tar1090-db).</td>
+                                <td>Use --aircraft-db=PATH for a custom location. Run --update-db to download/update.</td>
+                            </tr>
+                            <tr>
+                                <td>Waypoint database</td>
+                                <td>data/waypoints.csv</td>
+                                <td>125K-entry aviation waypoint database for fallback position resolution when ACARS messages reference waypoints by name.</td>
+                                <td>Bundled with the build. No user action needed unless replacing with a custom dataset.</td>
+                            </tr>
                         </tbody>
                     </table>
                 </div>
@@ -935,6 +979,31 @@
                     </div>
                 </details>
 
+                <details data-search="basestation sbs tar1090 vrs planeplotter aircraft position icao hex 30003 msg3">
+                    <summary>BaseStation SBS feed is not showing aircraft in tar1090/VRS</summary>
+                    <div class="details-body">
+                        <ul>
+                            <li>Confirm --basestation is enabled and your tracker is connecting to the correct port (default 30003).</li>
+                            <li>The SBS feed requires --acars to be active since positions come from ACARS/SBD decode.</li>
+                            <li>By default only GPS-quality positions are sent (ADS-C, free text coordinates, waypoint lookups). Use --basestation-beam to also include beam estimates.</li>
+                            <li>Run --update-db once to download the aircraft database for ICAO hex address mapping.</li>
+                            <li>If positions appear but with wrong coordinates, verify MSG,3 field count is 22 (this was fixed in a recent update).</li>
+                        </ul>
+                    </div>
+                </details>
+
+                <details data-search="position priority waypoint acars text gps adsc beam">
+                    <summary>Position source priority and quality</summary>
+                    <div class="details-body">
+                        <ul>
+                            <li>Aircraft positions follow a 4-tier priority: (1) ADS-C GPS structured data (highest confidence), (2) free text lat/lon from ACARS message body, (3) waypoint database lookup, (4) beam cache estimate (~200 km accuracy).</li>
+                            <li>Free text extraction supports three coordinate formats: POS[NS]ddddd[EW]dddddd, [NS]DDmmm[EW]DDDmmm, and LAT [NS] dd.ddd/LON [EW] ddd.ddd.</li>
+                            <li>Groundspeed and heading are computed from consecutive GPS-quality fixes separated by at least 10 seconds, with sanity checks (0.5–700 knots).</li>
+                            <li>Beam estimates remain visible on the built-in web map but are excluded from the BaseStation SBS feed unless --basestation-beam is set.</li>
+                        </ul>
+                    </div>
+                </details>
+
                 <p class="search-note">Visible topics: <span id="troubleCount"></span></p>
             </section>
 
@@ -981,6 +1050,18 @@
                             <li>Use RAW stdout or ZMQ when driving iridium-toolkit components.</li>
                             <li>Use --feed for aggregator endpoints such as airframes.io or acarshub.</li>
                             <li>Use --gsmtap when the destination is Wireshark rather than a text or JSON consumer.</li>
+                            <li>Use --basestation to feed tar1090, VRS, or PlanePlotter with Iridium-derived aircraft positions.</li>
+                        </ul>
+                    </article>
+
+                    <article class="grid-card">
+                        <h4>Checklist: BaseStation SBS setup</h4>
+                        <ul>
+                            <li>Enable both --acars and --basestation flags.</li>
+                            <li>Run --update-db once to download the aircraft database for ICAO hex mapping.</li>
+                            <li>Point tar1090/VRS at localhost:30003 (or your custom port).</li>
+                            <li>Optionally add --basestation-beam if you want approximate beam positions in the feed.</li>
+                            <li>Verify positions appear by checking the tracker's aircraft list for Iridium-sourced entries.</li>
                         </ul>
                     </article>
                 </div>
@@ -1088,6 +1169,9 @@
             if (goal === 'parsed') {
                 return ['--parsed'];
             }
+            if (goal === 'basestation') {
+                return ['--acars', '--basestation'];
+            }
             return [];
         }
 
@@ -1125,7 +1209,8 @@
                 acars: 'ACARS mode decodes aviation and SBD traffic carried in IDA frames without relying on external Python pipelines.',
                 gsmtap: 'GSMTAP mode sends IDA frames to Wireshark over UDP. Verify the destination host and port if packets do not appear.',
                 position: 'Position mode estimates receiver coordinates from Doppler measurements. Expect this to need time and multiple satellites before converging.',
-                parsed: 'Parsed mode outputs internal IDA parses directly. It is useful when your downstream workflow only needs data-bearing frames.'
+                parsed: 'Parsed mode outputs internal IDA parses directly. It is useful when your downstream workflow only needs data-bearing frames.',
+                basestation: 'BaseStation mode outputs MSG,3 SBS aircraft positions on a TCP server. Connect tar1090, VRS, or PlanePlotter to receive Iridium-derived positions alongside ADS-B data.'
             };
 
             commandExplanation.textContent = explanations[goalType.value] || 'Generated from your selected operating profile.';
