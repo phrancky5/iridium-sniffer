@@ -12,6 +12,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <err.h>
+#include <math.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -31,6 +32,17 @@
 extern volatile int running;
 
 #define BS_MAX_CLIENTS 16
+#define BS_TRACK_MAX   64
+
+/* Previous position cache for speed/heading derivation */
+typedef struct {
+    char hex[7];
+    double lat, lon;
+    uint64_t timestamp_ns;
+} bs_track_t;
+
+static bs_track_t bs_track[BS_TRACK_MAX];
+static int bs_track_count = 0;
 
 static int listen_fd = -1;
 static int clients[BS_MAX_CLIENTS];
@@ -269,6 +281,95 @@ int basestation_init(const char *endpoint)
     return 0;
 }
 
+/*
+ * Haversine distance in nautical miles between two lat/lon pairs.
+ */
+static double bs_distance_nm(double lat1, double lon1, double lat2, double lon2)
+{
+    double d2r = M_PI / 180.0;
+    double dlat = (lat2 - lat1) * d2r;
+    double dlon = (lon2 - lon1) * d2r;
+    double a = sin(dlat / 2) * sin(dlat / 2) +
+               cos(lat1 * d2r) * cos(lat2 * d2r) *
+               sin(dlon / 2) * sin(dlon / 2);
+    return 2.0 * atan2(sqrt(a), sqrt(1.0 - a)) * 3440.065;  /* Earth radius in nm */
+}
+
+/*
+ * Initial bearing in degrees from point 1 to point 2.
+ */
+static double bs_bearing(double lat1, double lon1, double lat2, double lon2)
+{
+    double d2r = M_PI / 180.0;
+    double dlon = (lon2 - lon1) * d2r;
+    double y = sin(dlon) * cos(lat2 * d2r);
+    double x = cos(lat1 * d2r) * sin(lat2 * d2r) -
+               sin(lat1 * d2r) * cos(lat2 * d2r) * cos(dlon);
+    double brg = atan2(y, x) * 180.0 / M_PI;
+    return fmod(brg + 360.0, 360.0);
+}
+
+/*
+ * Look up previous position for this hex and compute speed/heading.
+ * Returns 1 if speed/heading were derived, 0 if no prior fix.
+ */
+static int bs_derive_track(const char *hex, double lat, double lon,
+                            uint64_t timestamp_ns,
+                            double *gs_knots, double *track_deg)
+{
+    /* Find previous fix for this hex */
+    int idx = -1;
+    for (int i = 0; i < bs_track_count; i++) {
+        if (strcmp(bs_track[i].hex, hex) == 0) {
+            idx = i;
+            break;
+        }
+    }
+
+    int have_track = 0;
+    if (idx >= 0) {
+        double dt_sec = (double)(timestamp_ns - bs_track[idx].timestamp_ns) / 1e9;
+        /* Need at least 10 seconds between fixes to get meaningful speed */
+        if (dt_sec > 10.0 && dt_sec < 7200.0) {
+            double dist = bs_distance_nm(bs_track[idx].lat, bs_track[idx].lon,
+                                          lat, lon);
+            double speed = dist / (dt_sec / 3600.0);  /* nm/hr = knots */
+            /* Sanity: aircraft < 700 kts, reject obviously wrong values */
+            if (speed > 0.5 && speed < 700.0) {
+                *gs_knots = speed;
+                *track_deg = bs_bearing(bs_track[idx].lat, bs_track[idx].lon,
+                                         lat, lon);
+                have_track = 1;
+            }
+        }
+        /* Update existing entry */
+        bs_track[idx].lat = lat;
+        bs_track[idx].lon = lon;
+        bs_track[idx].timestamp_ns = timestamp_ns;
+    } else {
+        /* New aircraft -- add to cache, evict oldest if full */
+        if (bs_track_count < BS_TRACK_MAX) {
+            idx = bs_track_count++;
+        } else {
+            uint64_t oldest = UINT64_MAX;
+            idx = 0;
+            for (int i = 0; i < BS_TRACK_MAX; i++) {
+                if (bs_track[i].timestamp_ns < oldest) {
+                    oldest = bs_track[i].timestamp_ns;
+                    idx = i;
+                }
+            }
+        }
+        strncpy(bs_track[idx].hex, hex, 6);
+        bs_track[idx].hex[6] = '\0';
+        bs_track[idx].lat = lat;
+        bs_track[idx].lon = lon;
+        bs_track[idx].timestamp_ns = timestamp_ns;
+    }
+
+    return have_track;
+}
+
 void basestation_send_position(const char *reg, const char *flight,
                                 double lat, double lon,
                                 int alt_ft, uint64_t timestamp_ns)
@@ -279,6 +380,11 @@ void basestation_send_position(const char *reg, const char *flight,
     /* Look up ICAO hex from registration */
     const char *hex = aircraft_db_lookup(reg);
     if (!hex) return;  /* unknown aircraft, skip */
+
+    /* Derive groundspeed and heading from consecutive fixes */
+    double gs_knots = 0, track_deg = 0;
+    int have_track = bs_derive_track(hex, lat, lon, timestamp_ns,
+                                      &gs_knots, &track_deg);
 
     /* Format timestamp */
     time_t now = time(NULL);
@@ -296,12 +402,24 @@ void basestation_send_position(const char *reg, const char *flight,
      * DateGen,TimeGen,DateLog,TimeLog,
      * Callsign,Alt,GS,Track,Lat,Lon,VR,
      * Squawk,Alert,Emergency,SPI,IsOnGround */
-    if (alt_ft > -99999) {
+    if (alt_ft > -99999 && have_track) {
+        len = snprintf(msg, sizeof(msg),
+            "MSG,3,1,1,%s,1,%s,%s,%s,%s,%s,%d,%.0f,%.0f,%.6f,%.6f,,,,,,0\r\n",
+            hex, datestamp, timestamp, datestamp, timestamp,
+            (flight && flight[0]) ? flight : "",
+            alt_ft, gs_knots, track_deg, lat, lon);
+    } else if (alt_ft > -99999) {
         len = snprintf(msg, sizeof(msg),
             "MSG,3,1,1,%s,1,%s,%s,%s,%s,%s,%d,,,%.6f,%.6f,,,,,,0\r\n",
             hex, datestamp, timestamp, datestamp, timestamp,
             (flight && flight[0]) ? flight : "",
             alt_ft, lat, lon);
+    } else if (have_track) {
+        len = snprintf(msg, sizeof(msg),
+            "MSG,3,1,1,%s,1,%s,%s,%s,%s,%s,,%.0f,%.0f,%.6f,%.6f,,,,,,0\r\n",
+            hex, datestamp, timestamp, datestamp, timestamp,
+            (flight && flight[0]) ? flight : "",
+            gs_knots, track_deg, lat, lon);
     } else {
         len = snprintf(msg, sizeof(msg),
             "MSG,3,1,1,%s,1,%s,%s,%s,%s,%s,,,,%.6f,%.6f,,,,,,0\r\n",
