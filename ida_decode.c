@@ -562,7 +562,8 @@ int ida_decode(const demod_frame_t *frame, ida_burst_t *burst)
     lcw_t lcw;
     if (!decode_lcw(data, data_len, &lcw))
         return 0;
-    if (lcw.ft != 2)
+    /* Frame type: 2 = downlink IDA, 6/7 = uplink IDA */
+    if (lcw.ft != 2 && lcw.ft != 6 && lcw.ft != 7)
         return 0;
 
     /* Descramble + Chase BCH decode payload (skip 46 LCW bits) */
