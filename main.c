@@ -188,6 +188,7 @@ char *vita49_endpoint = NULL;
 
 /* BaseStation (SBS) output */
 int basestation_enabled = 0;
+int basestation_beam = 0;
 char *basestation_endpoint = NULL;
 char *aircraft_db_path = NULL;
 

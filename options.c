@@ -117,6 +117,7 @@ extern char *zmq_sub_endpoint;
 extern int vita49_enabled;
 extern char *vita49_endpoint;
 extern int basestation_enabled;
+extern int basestation_beam;
 extern char *basestation_endpoint;
 extern char *aircraft_db_path;
 extern int samp_rate_explicit;
@@ -212,6 +213,8 @@ static void usage(int exitcode) {
 "  BaseStation output:\n"
 "    --basestation[=PORT]     SBS server on PORT (default 30003, tools connect in)\n"
 "    --basestation=HOST:PORT  SBS push to remote host (auto-reconnect)\n"
+"    --basestation-beam       include beam-estimated positions in SBS feed\n"
+"                             (default: only GPS-quality positions are sent)\n"
 "    --aircraft-db=PATH       aircraft database CSV (default: ~/.iridium-sniffer/aircraft.csv)\n"
 "    --update-db              download/update aircraft database and exit\n"
 "\n"
@@ -289,6 +292,7 @@ void parse_options(int argc, char **argv) {
         OPT_SDRPLAY_GAIN,
         OPT_VITA49,
         OPT_BASESTATION,
+        OPT_BASESTATION_BEAM,
         OPT_AIRCRAFT_DB,
         OPT_UPDATE_DB,
     };
@@ -338,6 +342,7 @@ void parse_options(int argc, char **argv) {
         { "sdrplay-gain",   required_argument, NULL, OPT_SDRPLAY_GAIN },
         { "vita49",         optional_argument, NULL, OPT_VITA49 },
         { "basestation",    optional_argument, NULL, OPT_BASESTATION },
+        { "basestation-beam", no_argument,     NULL, OPT_BASESTATION_BEAM },
         { "aircraft-db",    required_argument, NULL, OPT_AIRCRAFT_DB },
         { "update-db",      no_argument,       NULL, OPT_UPDATE_DB },
         { NULL,             0,                 NULL, 0 }
@@ -622,6 +627,10 @@ void parse_options(int argc, char **argv) {
                 basestation_enabled = 1;
                 if (optarg)
                     basestation_endpoint = strdup(optarg);
+                break;
+
+            case OPT_BASESTATION_BEAM:
+                basestation_beam = 1;
                 break;
 
             case OPT_AIRCRAFT_DB:
